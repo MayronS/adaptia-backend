@@ -92,14 +92,15 @@ class QuizComQuestoesOut(QuizOut):
 # ── Questão ──────────────────────────────────────────────────────────────────
 
 class AlternativaOut(OrmBase):
-    id:     uuid.UUID
-    texto:  str
-    ordem:  int
-    # NÃO expõe 'correta' nem 'explicacao' antes da resposta
-
-class AlternativaComGabaritoOut(AlternativaOut):
+    id:         uuid.UUID
+    texto:      str
+    ordem:      int
     correta:    bool
     explicacao: str | None = None
+
+
+class AlternativaComGabaritoOut(AlternativaOut):
+    pass  # herda correta e explicacao de AlternativaOut
 
 class QuestaoOut(OrmBase):
     id:        uuid.UUID
