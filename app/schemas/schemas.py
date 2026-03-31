@@ -66,6 +66,7 @@ class TopicoOut(OrmBase):
     nivel_dificuldade: int
     prerequisito_id:   uuid.UUID | None = None
     ativo:             bool
+    materia:           MateriaOut | None = None   # ← inclui dados da matéria
 
 class TopicoComProgressoOut(TopicoOut):
     status:    StatusProgresso | None = None
