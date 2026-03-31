@@ -3,11 +3,11 @@ import enum
 from datetime import datetime
 from sqlalchemy import (
     String, Text, Boolean, Integer, SmallInteger,
-    ForeignKey, Numeric, Enum as SAEnum,
+    ForeignKey, Numeric, Enum as SAEnum, TIMESTAMP,
     UniqueConstraint, CheckConstraint,
 )
 from sqlalchemy.orm import Mapped, mapped_column, relationship
-from sqlalchemy.dialects.postgresql import UUID, TIMESTAMPTZ
+from sqlalchemy.dialects.postgresql import UUID
 from app.database import Base
 
 
@@ -41,8 +41,8 @@ class Usuario(Base):
     senha_hash:    Mapped[str]             = mapped_column(Text, nullable=False)
     perfil:        Mapped[PerfilUsuario]   = mapped_column(SAEnum(PerfilUsuario), nullable=False, default=PerfilUsuario.aluno)
     ativo:         Mapped[bool]            = mapped_column(Boolean, nullable=False, default=True)
-    criado_em:     Mapped[datetime]        = mapped_column(TIMESTAMPTZ, nullable=False, default=datetime.utcnow)
-    ultimo_acesso: Mapped[datetime | None] = mapped_column(TIMESTAMPTZ, nullable=True)
+    criado_em:     Mapped[datetime]        = mapped_column(TIMESTAMP(timezone=True), nullable=False, default=datetime.utcnow)
+    ultimo_acesso: Mapped[datetime | None] = mapped_column(TIMESTAMP(timezone=True), nullable=True)
 
     progressos:    Mapped[list["ProgressoTopico"]] = relationship(back_populates="usuario", cascade="all, delete-orphan")
     tentativas:    Mapped[list["TentativaQuiz"]]   = relationship(back_populates="usuario", cascade="all, delete-orphan")
@@ -79,10 +79,10 @@ class Topico(Base):
         CheckConstraint("nivel_dificuldade BETWEEN 1 AND 5", name="ck_topico_nivel"),
     )
 
-    materia:     Mapped["Materia"]             = relationship(back_populates="topicos")
-    prerequisito: Mapped["Topico | None"]      = relationship("Topico", remote_side="Topico.id")
-    quizzes:     Mapped[list["Quiz"]]          = relationship(back_populates="topico", cascade="all, delete-orphan")
-    progressos:  Mapped[list["ProgressoTopico"]] = relationship(back_populates="topico", cascade="all, delete-orphan")
+    materia:      Mapped["Materia"]              = relationship(back_populates="topicos")
+    prerequisito: Mapped["Topico | None"]        = relationship("Topico", remote_side="Topico.id")
+    quizzes:      Mapped[list["Quiz"]]           = relationship(back_populates="topico", cascade="all, delete-orphan")
+    progressos:   Mapped[list["ProgressoTopico"]] = relationship(back_populates="topico", cascade="all, delete-orphan")
     recomendacoes: Mapped[list["Recomendacao"]]  = relationship(back_populates="topico", cascade="all, delete-orphan")
 
 
@@ -97,7 +97,7 @@ class Quiz(Base):
     pontuacao_maxima: Mapped[int]        = mapped_column(Integer, nullable=False, default=100)
     tentativas_max:   Mapped[int | None] = mapped_column(SmallInteger)
     ativo:            Mapped[bool]       = mapped_column(Boolean, nullable=False, default=True)
-    criado_em:        Mapped[datetime]   = mapped_column(TIMESTAMPTZ, nullable=False, default=datetime.utcnow)
+    criado_em:        Mapped[datetime]   = mapped_column(TIMESTAMP(timezone=True), nullable=False, default=datetime.utcnow)
 
     topico:     Mapped["Topico"]              = relationship(back_populates="quizzes")
     questoes:   Mapped[list["Questao"]]       = relationship(back_populates="quiz", cascade="all, delete-orphan")
@@ -143,8 +143,8 @@ class ProgressoTopico(Base):
     topico_id:    Mapped[uuid.UUID]       = mapped_column(ForeignKey("topicos.id",  ondelete="CASCADE"), nullable=False)
     status:       Mapped[StatusProgresso] = mapped_column(SAEnum(StatusProgresso), nullable=False, default=StatusProgresso.bloqueado)
     pontuacao:    Mapped[int]             = mapped_column(SmallInteger, nullable=False, default=0)
-    iniciado_em:  Mapped[datetime | None] = mapped_column(TIMESTAMPTZ)
-    concluido_em: Mapped[datetime | None] = mapped_column(TIMESTAMPTZ)
+    iniciado_em:  Mapped[datetime | None] = mapped_column(TIMESTAMP(timezone=True))
+    concluido_em: Mapped[datetime | None] = mapped_column(TIMESTAMP(timezone=True))
 
     usuario: Mapped["Usuario"] = relationship(back_populates="progressos")
     topico:  Mapped["Topico"]  = relationship(back_populates="progressos")
@@ -160,7 +160,7 @@ class TentativaQuiz(Base):
     acertos:         Mapped[int]        = mapped_column(SmallInteger, nullable=False, default=0)
     total_questoes:  Mapped[int]        = mapped_column(SmallInteger, nullable=False, default=0)
     tempo_gasto_seg: Mapped[int | None] = mapped_column(Integer)
-    realizado_em:    Mapped[datetime]   = mapped_column(TIMESTAMPTZ, nullable=False, default=datetime.utcnow)
+    realizado_em:    Mapped[datetime]   = mapped_column(TIMESTAMP(timezone=True), nullable=False, default=datetime.utcnow)
 
     usuario:   Mapped["Usuario"]            = relationship(back_populates="tentativas")
     quiz:      Mapped["Quiz"]               = relationship(back_populates="tentativas")
@@ -179,8 +179,8 @@ class RespostaQuestao(Base):
     correta:            Mapped[bool]           = mapped_column(Boolean, nullable=False, default=False)
     tempo_resposta_seg: Mapped[int | None]     = mapped_column(SmallInteger)
 
-    tentativa:   Mapped["TentativaQuiz"] = relationship(back_populates="respostas")
-    questao:     Mapped["Questao"]       = relationship(back_populates="respostas")
+    tentativa:   Mapped["TentativaQuiz"]      = relationship(back_populates="respostas")
+    questao:     Mapped["Questao"]            = relationship(back_populates="respostas")
     alternativa: Mapped["Alternativa | None"] = relationship(back_populates="respostas")
 
 
@@ -193,7 +193,7 @@ class Recomendacao(Base):
     score_relevancia: Mapped[float]      = mapped_column(Numeric(5, 4), nullable=False, default=0)
     motivo:           Mapped[str | None] = mapped_column(String(120))
     visualizada:      Mapped[bool]       = mapped_column(Boolean, nullable=False, default=False)
-    gerada_em:        Mapped[datetime]   = mapped_column(TIMESTAMPTZ, nullable=False, default=datetime.utcnow)
+    gerada_em:        Mapped[datetime]   = mapped_column(TIMESTAMP(timezone=True), nullable=False, default=datetime.utcnow)
 
     usuario: Mapped["Usuario"] = relationship(back_populates="recomendacoes")
     topico:  Mapped["Topico"]  = relationship(back_populates="recomendacoes")
