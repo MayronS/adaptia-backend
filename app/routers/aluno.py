@@ -370,13 +370,44 @@ async def submeter_tentativa(
         if progresso.status == StatusProgresso.disponivel:
             progresso.status      = StatusProgresso.em_progresso
             progresso.iniciado_em = datetime.utcnow()
-        if pontuacao_100 > progresso.pontuacao:
-            progresso.pontuacao = pontuacao_100
-        if pontuacao_100 >= 70:
+
+        # Busca todos os quizzes ativos do tópico
+        res_quizzes = await db.execute(
+            select(Quiz).where(Quiz.topico_id == quiz.topico_id, Quiz.ativo == True)
+        )
+        todos_quizzes = res_quizzes.scalars().all()
+        total_quizzes = len(todos_quizzes)
+
+        # Para cada quiz, pega a melhor tentativa do aluno (maior pontuacao)
+        melhores_por_quiz: dict[uuid.UUID, int] = {}
+        for qz in todos_quizzes:
+            res_t = await db.execute(
+                select(func.max(TentativaQuiz.pontuacao)).where(
+                    TentativaQuiz.usuario_id == user.id,
+                    TentativaQuiz.quiz_id    == qz.id,
+                )
+            )
+            melhor = res_t.scalar_one_or_none()
+            if melhor is not None:
+                melhores_por_quiz[qz.id] = melhor
+
+        quizzes_feitos = len(melhores_por_quiz)
+
+        # Media de todos os quizzes (nao feitos contam como 0)
+        media = round(sum(melhores_por_quiz.values()) / total_quizzes) if total_quizzes > 0 else 0
+
+        # Atualiza pontuacao com a media geral do topico
+        progresso.pontuacao = media
+
+        # So conclui se TODOS os quizzes foram feitos E media >= 75%
+        if quizzes_feitos == total_quizzes and media >= 75:
             progresso.status       = StatusProgresso.concluido
             progresso.concluido_em = datetime.utcnow()
-            # Desbloqueia tópicos que dependiam deste
             await _desbloquear_proximos(user.id, quiz.topico_id, db)
+        elif progresso.status == StatusProgresso.concluido:
+            # Regrediu (ex: refez e baixou a media) - volta para em_progresso
+            progresso.status       = StatusProgresso.em_progresso
+            progresso.concluido_em = None
 
     # Gera novas recomendações após a tentativa
     await gerar_recomendacoes(user.id, db)
