@@ -326,14 +326,14 @@ async def submeter_tentativa(
             tempo_resposta_seg=resp.tempo_resposta_seg,
         ))
 
-    # Normaliza pontuação sobre as questões SORTEADAS (respondidas), não o banco completo
-    # Garante que 3/4 acertos = 75%, independente de ter 10 questões no banco
+    # Normaliza pontuação sempre em base 100 sobre as questões SORTEADAS (respondidas)
+    # Garante que 3/4 acertos = 75% independente do pontuacao_maxima do quiz no banco
     total_pontos_respondidos = sum(
         questao_map[r.questao_id].pontos
         for r in respostas_db
         if r.questao_id in questao_map
     ) or 1
-    pontuacao_100 = round(pontuacao_total / total_pontos_respondidos * quiz.pontuacao_maxima)
+    pontuacao_100 = round(pontuacao_total / total_pontos_respondidos * 100)
 
     # Cria tentativa
     tentativa = TentativaQuiz(
