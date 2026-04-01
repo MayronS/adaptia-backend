@@ -363,13 +363,49 @@ async def submeter_tentativa(
         if progresso.status == StatusProgresso.disponivel:
             progresso.status      = StatusProgresso.em_progresso
             progresso.iniciado_em = datetime.utcnow()
-        if pontuacao_100 > progresso.pontuacao:
-            progresso.pontuacao = pontuacao_100
-        if pontuacao_100 >= THRESHOLD_APROVACAO:  # 75%
+
+        # Busca todos os quizzes do tópico
+        res_quizzes = await db.execute(
+            select(Quiz).where(Quiz.topico_id == quiz.topico_id, Quiz.ativo == True)
+        )
+        todos_quizzes = res_quizzes.scalars().all()
+        total_quizzes_topico = len(todos_quizzes)
+
+        # Busca a melhor tentativa de cada quiz do tópico para este aluno
+        res_tent = await db.execute(
+            select(TentativaQuiz).where(
+                TentativaQuiz.usuario_id == user.id,
+                TentativaQuiz.quiz_id.in_([q.id for q in todos_quizzes]),
+            )
+        )
+        todas_tent = res_tent.scalars().all()
+
+        # Agrupa por quiz_id, mantém a maior pontuação
+        melhores_por_quiz: dict[uuid.UUID, int] = {}
+        for t in todas_tent:
+            atual = melhores_por_quiz.get(t.quiz_id, 0)
+            if t.pontuacao > atual:
+                melhores_por_quiz[t.quiz_id] = t.pontuacao
+
+        # Inclui a tentativa atual (ainda não persistida, mas já calculada)
+        melhores_por_quiz[quiz.id] = max(melhores_por_quiz.get(quiz.id, 0), pontuacao_100)
+
+        # Média das melhores pontuações sobre TODOS os quizzes do tópico
+        soma = sum(melhores_por_quiz.get(q.id, 0) for q in todos_quizzes)
+        media_topico = round(soma / total_quizzes_topico) if total_quizzes_topico > 0 else 0
+
+        progresso.pontuacao = media_topico
+
+        # Conclui o tópico somente quando a média geral >= THRESHOLD_APROVACAO (75%)
+        if media_topico >= THRESHOLD_APROVACAO:
             progresso.status       = StatusProgresso.concluido
             progresso.concluido_em = datetime.utcnow()
-            # Desbloqueia tópicos que dependiam deste
             await _desbloquear_proximos(user.id, quiz.topico_id, db)
+        else:
+            # Garante que volta para em_progresso se a média caiu abaixo do threshold
+            if progresso.status == StatusProgresso.concluido:
+                progresso.status       = StatusProgresso.em_progresso
+                progresso.concluido_em = None
 
     # Gera novas recomendações após a tentativa
     await gerar_recomendacoes(user.id, db)
