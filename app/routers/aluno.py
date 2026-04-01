@@ -18,28 +18,32 @@ from app.schemas.schemas import (
     RecomendacaoOut, TopicoComProgressoOut, MateriaOut,
     QuizComQuestoesOut, QuestaoOut, AlternativaOut,
     TentativaCreate, TentativaOut, RespostaQuestaoOut,
-    AlternativaComGabaritoOut,
+    AlternativaComGabaritoOut, MelhorTentativaOut,
 )
 from app.services.auth_service import require_aluno
 from app.services.recomendacao_service import gerar_recomendacoes
 
 router = APIRouter(prefix="/aluno", tags=["aluno"])
 
+# Número de questões sorteadas por quiz a cada tentativa
+QUESTOES_POR_QUIZ = 4
+
+# Pontuação mínima (%) para concluir tópico e desbloquear o próximo
+THRESHOLD_APROVACAO = 75
+
 
 # ── Dashboard ─────────────────────────────────────────────────────────────────
 
 @router.get("/dashboard", response_model=DashboardAlunoOut)
 async def dashboard(
-    user: Usuario    = Depends(require_aluno),
+    user: Usuario      = Depends(require_aluno),
     db:   AsyncSession = Depends(get_db),
 ):
-    # Progressos
     res = await db.execute(
         select(ProgressoTopico).where(ProgressoTopico.usuario_id == user.id)
     )
     progressos = res.scalars().all()
 
-    # Tentativas para calcular métricas
     res = await db.execute(
         select(TentativaQuiz).where(TentativaQuiz.usuario_id == user.id)
     )
@@ -50,7 +54,6 @@ async def dashboard(
     acertos_total    = sum(t.acertos for t in tentativas)
     taxa_acerto      = round(acertos_total / max(total_exercicios, 1) * 100, 1)
 
-    # Sequência de dias consecutivos com estudo
     datas = sorted({t.realizado_em.date() for t in tentativas}, reverse=True)
     sequencia = 0
     hoje = datetime.utcnow().date()
@@ -60,7 +63,6 @@ async def dashboard(
         else:
             break
 
-    # Recomendações ativas
     res = await db.execute(
         select(Recomendacao)
         .options(selectinload(Recomendacao.topico))
@@ -98,13 +100,11 @@ async def listar_topicos(
     res     = await db.execute(query)
     topicos = res.scalars().all()
 
-    # Busca progressos existentes do aluno
     res = await db.execute(
         select(ProgressoTopico).where(ProgressoTopico.usuario_id == user.id)
     )
     prog_map = {p.topico_id: p for p in res.scalars().all()}
 
-    # Cria progresso para tópicos novos que ainda não têm registro
     novos = []
     for t in topicos:
         if t.id not in prog_map:
@@ -141,7 +141,7 @@ async def listar_topicos(
 
 @router.get("/materias", response_model=list[MateriaOut])
 async def listar_materias(
-    user: Usuario    = Depends(require_aluno),
+    user: Usuario      = Depends(require_aluno),
     db:   AsyncSession = Depends(get_db),
 ):
     """Lista todas as matérias disponíveis na plataforma."""
@@ -152,23 +152,20 @@ async def listar_materias(
 @router.post("/materias/{materia_id}/adicionar", status_code=201)
 async def adicionar_materia(
     materia_id: uuid.UUID,
-    user: Usuario    = Depends(require_aluno),
+    user: Usuario      = Depends(require_aluno),
     db:   AsyncSession = Depends(get_db),
 ):
     """Inicializa o progresso do aluno em todos os tópicos de uma matéria."""
-    # Verifica se matéria existe
     res = await db.execute(select(Materia).where(Materia.id == materia_id, Materia.ativo == True))
     materia = res.scalar_one_or_none()
     if not materia:
         raise HTTPException(status_code=404, detail="Matéria não encontrada")
 
-    # Busca tópicos da matéria
     res = await db.execute(
         select(Topico).where(Topico.materia_id == materia_id, Topico.ativo == True).order_by(Topico.ordem)
     )
     topicos = res.scalars().all()
 
-    # Busca progressos já existentes para esses tópicos
     topico_ids = [t.id for t in topicos]
     res = await db.execute(
         select(ProgressoTopico).where(
@@ -178,7 +175,6 @@ async def adicionar_materia(
     )
     existentes = {p.topico_id for p in res.scalars().all()}
 
-    # Cria progresso apenas para os tópicos que ainda não têm
     criados = 0
     for topico in topicos:
         if topico.id not in existentes:
@@ -205,7 +201,12 @@ async def listar_quizzes_topico(
     user: Usuario = Depends(require_aluno),
     db:   AsyncSession = Depends(get_db),
 ):
-    # Verifica se o aluno tem acesso ao tópico
+    """
+    Retorna os quizzes do tópico com QUESTOES_POR_QUIZ questões sorteadas
+    aleatoriamente do banco a cada chamada.
+    As alternativas também são embaralhadas.
+    """
+    # Verifica acesso ao tópico
     res = await db.execute(
         select(ProgressoTopico).where(
             ProgressoTopico.usuario_id == user.id,
@@ -222,22 +223,21 @@ async def listar_quizzes_topico(
 
     res = await db.execute(
         select(Quiz)
-        .options(
-            selectinload(Quiz.questoes).selectinload(Questao.alternativas)
-        )
+        .options(selectinload(Quiz.questoes).selectinload(Questao.alternativas))
         .where(Quiz.topico_id == topico_id, Quiz.ativo == True)
     )
     quizzes = res.scalars().all()
 
-    # Monta resposta sem gabarito — sorteia 4 questões aleatórias de todas as disponíveis
-    QUESTOES_POR_QUIZ = 4
-
     resultado = []
     for q in quizzes:
+        # Filtra apenas questões ativas
         questoes_ativas = [quest for quest in q.questoes if quest.ativo]
 
-        # Sorteia até QUESTOES_POR_QUIZ questões aleatórias sem repetição
-        selecionadas = random.sample(questoes_ativas, min(QUESTOES_POR_QUIZ, len(questoes_ativas)))
+        # Sorteia QUESTOES_POR_QUIZ questões sem repetição
+        selecionadas = random.sample(
+            questoes_ativas,
+            min(QUESTOES_POR_QUIZ, len(questoes_ativas))
+        )
 
         q_out = QuizComQuestoesOut.model_validate(q)
         q_out.questoes = [
@@ -246,8 +246,12 @@ async def listar_quizzes_topico(
                 enunciado=quest.enunciado,
                 tipo=quest.tipo,
                 pontos=quest.pontos,
-                ordem=i + 1,  # renumera a ordem após o sorteio
-                alternativas=[AlternativaOut.model_validate(a) for a in random.sample(quest.alternativas, len(quest.alternativas))]
+                ordem=i + 1,  # renumera após o sorteio
+                # Embaralha a ordem das alternativas também
+                alternativas=[
+                    AlternativaOut.model_validate(a)
+                    for a in random.sample(quest.alternativas, len(quest.alternativas))
+                ]
             )
             for i, quest in enumerate(selecionadas)
         ]
@@ -264,8 +268,11 @@ async def submeter_tentativa(
     user: Usuario = Depends(require_aluno),
     db:   AsyncSession = Depends(get_db),
 ):
-    """Recebe as respostas do aluno, calcula pontuação e atualiza progresso."""
-    # Carrega quiz com questões e alternativas
+    """
+    Recebe as respostas do aluno, calcula pontuação e atualiza progresso.
+    A pontuação é calculada sobre as questões efetivamente respondidas
+    (não sobre o total do banco), para refletir o sorteio corretamente.
+    """
     res = await db.execute(
         select(Quiz)
         .options(selectinload(Quiz.questoes).selectinload(Questao.alternativas))
@@ -275,7 +282,6 @@ async def submeter_tentativa(
     if not quiz:
         raise HTTPException(status_code=404, detail="Quiz não encontrado")
 
-    # Verifica limite de tentativas
     if quiz.tentativas_max:
         res = await db.execute(
             select(func.count(TentativaQuiz.id)).where(
@@ -283,34 +289,37 @@ async def submeter_tentativa(
                 TentativaQuiz.quiz_id    == quiz.id,
             )
         )
-        count = res.scalar_one()
-        if count >= quiz.tentativas_max:
+        if res.scalar_one() >= quiz.tentativas_max:
             raise HTTPException(status_code=400, detail="Limite de tentativas atingido")
 
-    # Mapa questão_id → alternativa correta
+    # Monta gabarito completo do banco (todas as questões do quiz)
     gabarito: dict[uuid.UUID, uuid.UUID] = {}
     alt_map:  dict[uuid.UUID, Alternativa] = {}
+    questao_map: dict[uuid.UUID, Questao] = {}
     for q in quiz.questoes:
+        questao_map[q.id] = q
         for a in q.alternativas:
             alt_map[a.id] = a
             if a.correta:
                 gabarito[q.id] = a.id
 
-    # Calcula acertos
-    acertos = 0
+    # Calcula acertos apenas sobre as questões que vieram no sorteio (body.respostas)
+    acertos        = 0
     pontuacao_total = 0
     respostas_db: list[RespostaQuestao] = []
-
-    questao_map = {q.id: q for q in quiz.questoes}
 
     for resp in body.respostas:
         questao = questao_map.get(resp.questao_id)
         if not questao:
-            continue
-        correta = resp.alternativa_id is not None and gabarito.get(resp.questao_id) == resp.alternativa_id
+            continue  # questão não pertence a este quiz — ignora
+
+        correta = (
+            resp.alternativa_id is not None
+            and gabarito.get(resp.questao_id) == resp.alternativa_id
+        )
         if correta:
-            acertos          += 1
-            pontuacao_total  += questao.pontos
+            acertos         += 1
+            pontuacao_total += questao.pontos
 
         respostas_db.append(RespostaQuestao(
             questao_id=resp.questao_id,
@@ -320,9 +329,17 @@ async def submeter_tentativa(
             tempo_resposta_seg=resp.tempo_resposta_seg,
         ))
 
-    # Normaliza pontuação para 0-100
-    total_pontos = sum(q.pontos for q in quiz.questoes) or 1
-    pontuacao_100 = round(pontuacao_total / total_pontos * quiz.pontuacao_maxima)
+    # Normaliza sobre as questões respondidas (= questões sorteadas)
+    total_respondidas = len(respostas_db)
+    total_pontos_resp = sum(
+        questao_map[r.questao_id].pontos
+        for r in respostas_db
+        if r.questao_id in questao_map
+    )
+    pontuacao_100 = (
+        round(pontuacao_total / total_pontos_resp * quiz.pontuacao_maxima)
+        if total_pontos_resp > 0 else 0
+    )
 
     # Cria tentativa
     tentativa = TentativaQuiz(
@@ -330,7 +347,7 @@ async def submeter_tentativa(
         quiz_id=quiz.id,
         pontuacao=pontuacao_100,
         acertos=acertos,
-        total_questoes=len(quiz.questoes),
+        total_questoes=total_respondidas,
         tempo_gasto_seg=body.tempo_gasto_seg,
     )
     db.add(tentativa)
@@ -352,15 +369,17 @@ async def submeter_tentativa(
         if progresso.status == StatusProgresso.disponivel:
             progresso.status      = StatusProgresso.em_progresso
             progresso.iniciado_em = datetime.utcnow()
+
+        # Guarda a melhor pontuação já obtida no tópico
         if pontuacao_100 > progresso.pontuacao:
             progresso.pontuacao = pontuacao_100
-        if pontuacao_100 >= 70:
+
+        # Desbloqueia próximo tópico ao atingir THRESHOLD_APROVACAO (75%)
+        if pontuacao_100 >= THRESHOLD_APROVACAO:
             progresso.status       = StatusProgresso.concluido
             progresso.concluido_em = datetime.utcnow()
-            # Desbloqueia tópicos que dependiam deste
             await _desbloquear_proximos(user.id, quiz.topico_id, db)
 
-    # Gera novas recomendações após a tentativa
     await gerar_recomendacoes(user.id, db)
 
     # Monta resposta com gabarito
@@ -387,11 +406,43 @@ async def submeter_tentativa(
     )
 
 
+# ── Melhores tentativas por quiz ──────────────────────────────────────────────
+
+@router.get("/tentativas/melhores", response_model=list[MelhorTentativaOut])
+async def melhores_tentativas(
+    user: Usuario      = Depends(require_aluno),
+    db:   AsyncSession = Depends(get_db),
+):
+    """Retorna a melhor tentativa de cada quiz para o aluno logado."""
+    res = await db.execute(
+        select(TentativaQuiz).where(TentativaQuiz.usuario_id == user.id)
+    )
+    todas = res.scalars().all()
+
+    # Agrupa por quiz_id mantendo a de maior pontuação
+    melhores: dict[uuid.UUID, TentativaQuiz] = {}
+    for t in todas:
+        atual = melhores.get(t.quiz_id)
+        if atual is None or t.pontuacao > atual.pontuacao:
+            melhores[t.quiz_id] = t
+
+    return [
+        MelhorTentativaOut(
+            quiz_id=t.quiz_id,
+            pontuacao=t.pontuacao,
+            acertos=t.acertos,
+            total_questoes=t.total_questoes,
+            aprovado=t.pontuacao >= THRESHOLD_APROVACAO,
+        )
+        for t in melhores.values()
+    ]
+
+
 # ── Recomendações ─────────────────────────────────────────────────────────────
 
 @router.post("/recomendacoes/gerar")
 async def forcar_recomendacoes(
-    user: Usuario = Depends(require_aluno),
+    user: Usuario      = Depends(require_aluno),
     db:   AsyncSession = Depends(get_db),
 ):
     """Força regeneração das recomendações para o aluno logado."""
@@ -402,7 +453,7 @@ async def forcar_recomendacoes(
 @router.patch("/recomendacoes/{rec_id}/visualizar")
 async def marcar_visualizada(
     rec_id: uuid.UUID,
-    user: Usuario = Depends(require_aluno),
+    user: Usuario      = Depends(require_aluno),
     db:   AsyncSession = Depends(get_db),
 ):
     res = await db.execute(
@@ -420,13 +471,19 @@ async def marcar_visualizada(
 
 # ── Helper interno ────────────────────────────────────────────────────────────
 
-async def _desbloquear_proximos(usuario_id: uuid.UUID, topico_concluido_id: uuid.UUID, db: AsyncSession):
+async def _desbloquear_proximos(
+    usuario_id: uuid.UUID,
+    topico_concluido_id: uuid.UUID,
+    db: AsyncSession,
+):
     """Desbloqueia os tópicos cujo pré-requisito acabou de ser concluído."""
     res = await db.execute(
-        select(Topico).where(Topico.prerequisito_id == topico_concluido_id, Topico.ativo == True)
+        select(Topico).where(
+            Topico.prerequisito_id == topico_concluido_id,
+            Topico.ativo == True,
+        )
     )
-    proximos = res.scalars().all()
-    for prox in proximos:
+    for prox in res.scalars().all():
         res2 = await db.execute(
             select(ProgressoTopico).where(
                 ProgressoTopico.usuario_id == usuario_id,

@@ -29,18 +29,18 @@ class TokenData(BaseModel):
 # ── Usuário ──────────────────────────────────────────────────────────────────
 
 class UsuarioCreate(BaseModel):
-    nome:     str         = Field(..., min_length=2, max_length=120)
+    nome:     str           = Field(..., min_length=2, max_length=120)
     email:    EmailStr
-    password: str         = Field(..., min_length=6)
+    password: str           = Field(..., min_length=6)
     perfil:   PerfilUsuario = PerfilUsuario.aluno
 
 class UsuarioOut(OrmBase):
-    id:           uuid.UUID
-    nome:         str
-    email:        str
-    perfil:       PerfilUsuario
-    ativo:        bool
-    criado_em:    datetime
+    id:            uuid.UUID
+    nome:          str
+    email:         str
+    perfil:        PerfilUsuario
+    ativo:         bool
+    criado_em:     datetime
     ultimo_acesso: datetime | None = None
 
 
@@ -66,7 +66,7 @@ class TopicoOut(OrmBase):
     nivel_dificuldade: int
     prerequisito_id:   uuid.UUID | None = None
     ativo:             bool
-    materia:           MateriaOut | None = None   # ← inclui dados da matéria
+    materia:           MateriaOut | None = None
 
 class TopicoComProgressoOut(TopicoOut):
     status:    StatusProgresso | None = None
@@ -98,16 +98,15 @@ class AlternativaOut(OrmBase):
     correta:    bool
     explicacao: str | None = None
 
-
 class AlternativaComGabaritoOut(AlternativaOut):
     pass  # herda correta e explicacao de AlternativaOut
 
 class QuestaoOut(OrmBase):
-    id:        uuid.UUID
-    enunciado: str
-    tipo:      TipoQuestao
-    pontos:    int
-    ordem:     int
+    id:           uuid.UUID
+    enunciado:    str
+    tipo:         TipoQuestao
+    pontos:       int
+    ordem:        int
     alternativas: list[AlternativaOut] = []
 
 
@@ -125,21 +124,31 @@ class TentativaCreate(BaseModel):
     respostas:       list[RespostaItem]
 
 class RespostaQuestaoOut(OrmBase):
-    questao_id:         uuid.UUID
-    alternativa_id:     uuid.UUID | None
-    correta:            bool
-    tempo_resposta_seg: int | None
+    questao_id:          uuid.UUID
+    alternativa_id:      uuid.UUID | None
+    correta:             bool
+    tempo_resposta_seg:  int | None
     alternativa_correta: AlternativaComGabaritoOut | None = None
 
 class TentativaOut(OrmBase):
-    id:             uuid.UUID
+    id:              uuid.UUID
+    quiz_id:         uuid.UUID
+    pontuacao:       int
+    acertos:         int
+    total_questoes:  int
+    tempo_gasto_seg: int | None
+    realizado_em:    datetime
+    respostas:       list[RespostaQuestaoOut] = []
+
+
+# ── Melhor tentativa por quiz ─────────────────────────────────────────────────
+
+class MelhorTentativaOut(BaseModel):
     quiz_id:        uuid.UUID
-    pontuacao:      int
+    pontuacao:      int   # 0-100
     acertos:        int
     total_questoes: int
-    tempo_gasto_seg: int | None
-    realizado_em:   datetime
-    respostas:      list[RespostaQuestaoOut] = []
+    aprovado:       bool  # pontuacao >= 75
 
 
 # ── Progresso ────────────────────────────────────────────────────────────────
@@ -176,15 +185,15 @@ class DashboardAlunoOut(BaseModel):
     recomendacoes:    list[RecomendacaoOut]
 
 class AlunoResumoOut(BaseModel):
-    usuario:         UsuarioOut
-    pontuacao_media: float
-    taxa_acerto_pct: float
+    usuario:          UsuarioOut
+    pontuacao_media:  float
+    taxa_acerto_pct:  float
     total_tentativas: int
-    ultimo_acesso:   datetime | None
+    ultimo_acesso:    datetime | None
 
 class DashboardProfessorOut(BaseModel):
-    media_turma:      float
-    total_alunos:     int
-    alunos_ativos:    int
-    precisam_apoio:   int
-    alunos:           list[AlunoResumoOut]
+    media_turma:    float
+    total_alunos:   int
+    alunos_ativos:  int
+    precisam_apoio: int
+    alunos:         list[AlunoResumoOut]
