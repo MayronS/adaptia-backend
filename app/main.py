@@ -17,6 +17,14 @@ async def lifespan(app: FastAPI):
     # Cria tabelas e tipos ENUM automaticamente se não existirem
     async with engine.begin() as conn:
         await conn.run_sync(Base.metadata.create_all, checkfirst=True)
+
+    # Pre-aquece o bcrypt para evitar lentidão/timeout na primeira requisição de login.
+    # O bcrypt faz lazy-loading da lib nativa na primeira chamada — isso pode demorar
+    # vários segundos em ambientes como PythonAnywhere, causando timeout no primeiro login.
+    from app.services.auth_service import hash_password, verify_password
+    _dummy_hash = hash_password("warmup")
+    verify_password("warmup", _dummy_hash)
+
     yield
     await engine.dispose()
  

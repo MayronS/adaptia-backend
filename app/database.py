@@ -39,6 +39,8 @@ engine = create_async_engine(
     echo=settings.APP_ENV == "development",
     pool_size=5,
     max_overflow=10,
+    pool_pre_ping=True,    # testa a conexão antes de usar — evita "connection closed" no cold start
+    pool_recycle=1800,     # recicla conexões a cada 30min — evita timeout por inatividade
     connect_args=connect_args,
 )
  
