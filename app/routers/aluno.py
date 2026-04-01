@@ -1,5 +1,6 @@
 from datetime import datetime, timedelta
 import uuid
+import random
 
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -228,9 +229,16 @@ async def listar_quizzes_topico(
     )
     quizzes = res.scalars().all()
 
-    # Monta resposta sem gabarito
+    # Monta resposta sem gabarito — sorteia 4 questões aleatórias de todas as disponíveis
+    QUESTOES_POR_QUIZ = 4
+
     resultado = []
     for q in quizzes:
+        questoes_ativas = [quest for quest in q.questoes if quest.ativo]
+
+        # Sorteia até QUESTOES_POR_QUIZ questões aleatórias sem repetição
+        selecionadas = random.sample(questoes_ativas, min(QUESTOES_POR_QUIZ, len(questoes_ativas)))
+
         q_out = QuizComQuestoesOut.model_validate(q)
         q_out.questoes = [
             QuestaoOut(
@@ -238,10 +246,10 @@ async def listar_quizzes_topico(
                 enunciado=quest.enunciado,
                 tipo=quest.tipo,
                 pontos=quest.pontos,
-                ordem=quest.ordem,
-                alternativas=[AlternativaOut.model_validate(a) for a in quest.alternativas]
+                ordem=i + 1,  # renumera a ordem após o sorteio
+                alternativas=[AlternativaOut.model_validate(a) for a in random.sample(quest.alternativas, len(quest.alternativas))]
             )
-            for quest in sorted(q.questoes, key=lambda x: x.ordem)
+            for i, quest in enumerate(selecionadas)
         ]
         resultado.append(q_out)
 
@@ -249,32 +257,6 @@ async def listar_quizzes_topico(
 
 
 # ── Tentativa ─────────────────────────────────────────────────────────────────
-
-@router.get("/tentativas/melhores")
-async def get_melhores_tentativas(
-    user: Usuario = Depends(require_aluno),
-    db:   AsyncSession = Depends(get_db),
-):
-    """Retorna a melhor tentativa de cada quiz para o aluno logado."""
-    res = await db.execute(
-        select(TentativaQuiz).where(TentativaQuiz.usuario_id == user.id)
-    )
-    todas = res.scalars().all()
-
-    # Agrupa por quiz_id e pega a de maior pontuação
-    mapa = {}
-    for t in todas:
-        qid = str(t.quiz_id)
-        if qid not in mapa or t.pontuacao > mapa[qid]["pontuacao"]:
-            mapa[qid] = {
-                "quiz_id":        qid,
-                "pontuacao":      t.pontuacao,
-                "acertos":        t.acertos,
-                "total_questoes": t.total_questoes,
-                "aprovado":       t.pontuacao >= 75,
-            }
-    return list(mapa.values())
-
 
 @router.post("/tentativas", response_model=TentativaOut, status_code=201)
 async def submeter_tentativa(
@@ -338,9 +320,9 @@ async def submeter_tentativa(
             tempo_resposta_seg=resp.tempo_resposta_seg,
         ))
 
-    # Normaliza pontuação para 0-100 (percentual de acerto)
+    # Normaliza pontuação para 0-100
     total_pontos = sum(q.pontos for q in quiz.questoes) or 1
-    pontuacao_100 = round(pontuacao_total / total_pontos * 100)
+    pontuacao_100 = round(pontuacao_total / total_pontos * quiz.pontuacao_maxima)
 
     # Cria tentativa
     tentativa = TentativaQuiz(
@@ -370,44 +352,13 @@ async def submeter_tentativa(
         if progresso.status == StatusProgresso.disponivel:
             progresso.status      = StatusProgresso.em_progresso
             progresso.iniciado_em = datetime.utcnow()
-
-        # Busca todos os quizzes ativos do tópico
-        res_quizzes = await db.execute(
-            select(Quiz).where(Quiz.topico_id == quiz.topico_id, Quiz.ativo == True)
-        )
-        todos_quizzes = res_quizzes.scalars().all()
-        total_quizzes = len(todos_quizzes)
-
-        # Para cada quiz, pega a melhor tentativa do aluno (maior pontuacao)
-        melhores_por_quiz: dict[uuid.UUID, int] = {}
-        for qz in todos_quizzes:
-            res_t = await db.execute(
-                select(func.max(TentativaQuiz.pontuacao)).where(
-                    TentativaQuiz.usuario_id == user.id,
-                    TentativaQuiz.quiz_id    == qz.id,
-                )
-            )
-            melhor = res_t.scalar_one_or_none()
-            if melhor is not None:
-                melhores_por_quiz[qz.id] = melhor
-
-        quizzes_feitos = len(melhores_por_quiz)
-
-        # Media de todos os quizzes (nao feitos contam como 0)
-        media = round(sum(melhores_por_quiz.values()) / total_quizzes) if total_quizzes > 0 else 0
-
-        # Atualiza pontuacao com a media geral do topico
-        progresso.pontuacao = media
-
-        # So conclui se TODOS os quizzes foram feitos E media >= 75%
-        if quizzes_feitos == total_quizzes and media >= 75:
+        if pontuacao_100 > progresso.pontuacao:
+            progresso.pontuacao = pontuacao_100
+        if pontuacao_100 >= 70:
             progresso.status       = StatusProgresso.concluido
             progresso.concluido_em = datetime.utcnow()
+            # Desbloqueia tópicos que dependiam deste
             await _desbloquear_proximos(user.id, quiz.topico_id, db)
-        elif progresso.status == StatusProgresso.concluido:
-            # Regrediu (ex: refez e baixou a media) - volta para em_progresso
-            progresso.status       = StatusProgresso.em_progresso
-            progresso.concluido_em = None
 
     # Gera novas recomendações após a tentativa
     await gerar_recomendacoes(user.id, db)
