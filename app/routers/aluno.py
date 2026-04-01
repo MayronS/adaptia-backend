@@ -18,12 +18,18 @@ from app.schemas.schemas import (
     RecomendacaoOut, TopicoComProgressoOut, MateriaOut,
     QuizComQuestoesOut, QuestaoOut, AlternativaOut,
     TentativaCreate, TentativaOut, RespostaQuestaoOut,
-    AlternativaComGabaritoOut,
+    AlternativaComGabaritoOut, MelhorTentativaOut,
 )
 from app.services.auth_service import require_aluno
 from app.services.recomendacao_service import gerar_recomendacoes
 
 router = APIRouter(prefix="/aluno", tags=["aluno"])
+
+# Número de questões sorteadas por quiz a cada tentativa
+QUESTOES_POR_QUIZ = 4
+
+# Pontuação mínima (%) para concluir tópico e desbloquear o próximo
+THRESHOLD_APROVACAO = 75
 
 
 # ── Dashboard ─────────────────────────────────────────────────────────────────
@@ -63,7 +69,7 @@ async def dashboard(
     # Recomendações ativas
     res = await db.execute(
         select(Recomendacao)
-        .options(selectinload(Recomendacao.topico).selectinload(Topico.materia))
+        .options(selectinload(Recomendacao.topico))
         .where(Recomendacao.usuario_id == user.id, Recomendacao.visualizada == False)
         .order_by(Recomendacao.score_relevancia.desc())
         .limit(5)
@@ -320,8 +326,8 @@ async def submeter_tentativa(
             tempo_resposta_seg=resp.tempo_resposta_seg,
         ))
 
-    # Normaliza pontuação sobre as questões SORTEADAS (respondidas), não sobre o banco completo
-    # Isso garante que 3/4 acertos = 75%, independente de ter 10 questões no banco
+    # Normaliza pontuação sobre as questões SORTEADAS (respondidas), não o banco completo
+    # Garante que 3/4 acertos = 75%, independente de ter 10 questões no banco
     total_pontos_respondidos = sum(
         questao_map[r.questao_id].pontos
         for r in respostas_db
@@ -359,7 +365,7 @@ async def submeter_tentativa(
             progresso.iniciado_em = datetime.utcnow()
         if pontuacao_100 > progresso.pontuacao:
             progresso.pontuacao = pontuacao_100
-        if pontuacao_100 >= 75:  # 75% para concluir tópico e desbloquear próximo
+        if pontuacao_100 >= THRESHOLD_APROVACAO:  # 75%
             progresso.status       = StatusProgresso.concluido
             progresso.concluido_em = datetime.utcnow()
             # Desbloqueia tópicos que dependiam deste
@@ -421,6 +427,38 @@ async def marcar_visualizada(
         raise HTTPException(status_code=404, detail="Recomendação não encontrada")
     rec.visualizada = True
     return {"ok": True}
+
+
+# ── Melhores tentativas por quiz ──────────────────────────────────────────────
+
+@router.get("/tentativas/melhores", response_model=list[MelhorTentativaOut])
+async def melhores_tentativas(
+    user: Usuario      = Depends(require_aluno),
+    db:   AsyncSession = Depends(get_db),
+):
+    """Retorna a melhor tentativa de cada quiz para o aluno logado."""
+    res = await db.execute(
+        select(TentativaQuiz).where(TentativaQuiz.usuario_id == user.id)
+    )
+    todas = res.scalars().all()
+
+    # Agrupa por quiz_id mantendo a de maior pontuação
+    melhores: dict[uuid.UUID, TentativaQuiz] = {}
+    for t in todas:
+        atual = melhores.get(t.quiz_id)
+        if atual is None or t.pontuacao > atual.pontuacao:
+            melhores[t.quiz_id] = t
+
+    return [
+        MelhorTentativaOut(
+            quiz_id=t.quiz_id,
+            pontuacao=t.pontuacao,
+            acertos=t.acertos,
+            total_questoes=t.total_questoes,
+            aprovado=t.pontuacao >= THRESHOLD_APROVACAO,
+        )
+        for t in melhores.values()
+    ]
 
 
 # ── Helper interno ────────────────────────────────────────────────────────────
