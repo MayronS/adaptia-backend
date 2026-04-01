@@ -63,7 +63,7 @@ async def dashboard(
     # Recomendações ativas
     res = await db.execute(
         select(Recomendacao)
-        .options(selectinload(Recomendacao.topico))
+        .options(selectinload(Recomendacao.topico).selectinload(Topico.materia))
         .where(Recomendacao.usuario_id == user.id, Recomendacao.visualizada == False)
         .order_by(Recomendacao.score_relevancia.desc())
         .limit(5)
