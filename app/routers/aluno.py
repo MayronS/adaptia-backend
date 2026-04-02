@@ -4,7 +4,7 @@ import random
 
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy import select, func
+from sqlalchemy import select, func, update
 from sqlalchemy.orm import selectinload
 
 from app.database import get_db
@@ -350,6 +350,21 @@ async def submeter_tentativa(
     for r in respostas_db:
         r.tentativa_id = tentativa.id
         db.add(r)
+
+    # Incrementa contadores de acertos/erros por questão (para análise de dados)
+    for r in respostas_db:
+        if r.correta:
+            await db.execute(
+                update(Questao)
+                .where(Questao.id == r.questao_id)
+                .values(total_acertos=Questao.total_acertos + 1)
+            )
+        else:
+            await db.execute(
+                update(Questao)
+                .where(Questao.id == r.questao_id)
+                .values(total_erros=Questao.total_erros + 1)
+            )
 
     # Atualiza progresso do tópico
     res = await db.execute(
