@@ -1,7 +1,7 @@
 from __future__ import annotations
 import uuid
 from datetime import datetime
-from pydantic import BaseModel, EmailStr, Field, ConfigDict
+from pydantic import BaseModel, EmailStr, Field, ConfigDict, field_validator
 from app.models.models import PerfilUsuario, StatusProgresso, TipoQuestao
 
 
@@ -14,10 +14,21 @@ class OrmBase(BaseModel):
 # ── Auth ─────────────────────────────────────────────────────────────────────
 
 class LoginRequest(BaseModel):
-    email:    EmailStr
+    email:    str   # aceita "email@x.com" ou "email@x.com/admin"
     password: str
     # Perfil desejado para o login (quando o usuário tem múltiplos perfis)
     perfil:   PerfilUsuario | None = None
+
+    @field_validator("email")
+    @classmethod
+    def validar_email(cls, v: str) -> str:
+        v = v.strip()
+        # Remove sufixo /admin para validar só a parte do email
+        email_puro = v.removesuffix("/admin")
+        # Validação básica de formato
+        if "@" not in email_puro or "." not in email_puro.split("@")[-1]:
+            raise ValueError("E-mail inválido")
+        return v
 
 class Token(BaseModel):
     access_token: str
