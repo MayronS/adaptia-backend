@@ -24,12 +24,18 @@ async def dashboard(
     _:  Usuario = Depends(require_professor),
     db: AsyncSession = Depends(get_db),
 ):
-    # Todos os alunos ativos
+    # Todos os alunos ativos (via tabela de vínculos de perfis)
+    from app.models.models import UsuarioPerfil
+    from sqlalchemy.orm import selectinload
     res = await db.execute(
-        select(Usuario).where(
-            Usuario.perfil == PerfilUsuario.aluno,
-            Usuario.ativo  == True,
+        select(Usuario)
+        .join(UsuarioPerfil, UsuarioPerfil.usuario_id == Usuario.id)
+        .where(
+            UsuarioPerfil.perfil == PerfilUsuario.aluno,
+            UsuarioPerfil.ativo  == True,
+            Usuario.ativo        == True,
         )
+        .options(selectinload(Usuario.perfis))
     )
     alunos = res.scalars().all()
 
@@ -51,7 +57,7 @@ async def dashboard(
             precisam_apoio += 1
 
         resumos.append(AlunoResumoOut(
-            usuario=UsuarioOut.model_validate(aluno),
+            usuario=UsuarioOut.from_usuario(aluno),
             pontuacao_media=media,
             taxa_acerto_pct=taxa,
             total_tentativas=len(tentativas),

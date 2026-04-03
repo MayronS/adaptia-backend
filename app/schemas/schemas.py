@@ -16,14 +16,17 @@ class OrmBase(BaseModel):
 class LoginRequest(BaseModel):
     email:    EmailStr
     password: str
+    # Perfil desejado para o login (quando o usuário tem múltiplos perfis)
+    perfil:   PerfilUsuario | None = None
 
 class Token(BaseModel):
     access_token: str
     token_type:   str = "bearer"
+    perfis:       list[PerfilUsuario] = []  # todos os perfis ativos do usuário
 
 class TokenData(BaseModel):
-    usuario_id: uuid.UUID
-    perfil:     PerfilUsuario
+    usuario_id:    uuid.UUID
+    perfil_ativo:  PerfilUsuario  # perfil com o qual o usuário fez login nesta sessão
 
 
 # ── Usuário ──────────────────────────────────────────────────────────────────
@@ -38,10 +41,30 @@ class UsuarioOut(OrmBase):
     id:            uuid.UUID
     nome:          str
     email:         str
-    perfil:        PerfilUsuario
+    perfis:        list[PerfilUsuario] = []  # lista de todos os perfis ativos
     ativo:         bool
     criado_em:     datetime
     ultimo_acesso: datetime | None = None
+
+    @classmethod
+    def from_usuario(cls, u: object) -> "UsuarioOut":
+        """Constrói UsuarioOut a partir de um objeto Usuario ORM."""
+        return cls(
+            id=u.id,
+            nome=u.nome,
+            email=u.email,
+            perfis=u.get_perfis_ativos(),
+            ativo=u.ativo,
+            criado_em=u.criado_em,
+            ultimo_acesso=u.ultimo_acesso,
+        )
+
+
+# ── Adicionar perfil ─────────────────────────────────────────────────────────
+
+class AdicionarPerfilRequest(BaseModel):
+    """Permite que um usuário já autenticado adicione um novo perfil à sua conta."""
+    perfil: PerfilUsuario
 
 
 # ── Matéria ───────────────────────────────────────────────────────────────────
@@ -99,7 +122,7 @@ class AlternativaOut(OrmBase):
     explicacao: str | None = None
 
 class AlternativaComGabaritoOut(AlternativaOut):
-    pass  # herda correta e explicacao de AlternativaOut
+    pass
 
 class QuestaoOut(OrmBase):
     id:           uuid.UUID
@@ -145,10 +168,10 @@ class TentativaOut(OrmBase):
 
 class MelhorTentativaOut(BaseModel):
     quiz_id:        uuid.UUID
-    pontuacao:      int   # 0-100
+    pontuacao:      int
     acertos:        int
     total_questoes: int
-    aprovado:       bool  # pontuacao >= 75
+    aprovado:       bool
 
 
 # ── Progresso ────────────────────────────────────────────────────────────────
