@@ -233,14 +233,14 @@ async def enviar_convite(
         existente.criado_em = datetime.utcnow()
         existente.respondido_em = None
         await db.commit()
-        await db.refresh(existente)
-        await db.execute(
+        # Recarrega com relações para serialização correta
+        res_re = await db.execute(
             select(VinculoProfessorAluno)
             .options(selectinload(VinculoProfessorAluno.professor).selectinload(Usuario.perfis),
                      selectinload(VinculoProfessorAluno.aluno).selectinload(Usuario.perfis))
             .where(VinculoProfessorAluno.id == existente.id)
         )
-        return existente
+        return res_re.scalar_one()
 
     vinculo = VinculoProfessorAluno(professor_id=user.id, aluno_id=aluno.id)
     db.add(vinculo)

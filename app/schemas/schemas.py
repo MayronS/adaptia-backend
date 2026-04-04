@@ -280,13 +280,33 @@ from app.models.models import StatusVinculo
 class ConviteCreate(BaseModel):
     aluno_email: EmailStr
 
-class ConviteOut(OrmBase):
+class ConviteOut(BaseModel):
     id:            uuid.UUID
     status:        StatusVinculo
     criado_em:     datetime
     respondido_em: datetime | None = None
     professor:     UsuarioOut | None = None
     aluno:         UsuarioOut | None = None
+
+    model_config = ConfigDict(from_attributes=True)
+
+    @model_validator(mode="before")
+    @classmethod
+    def converter_usuarios(cls, data):
+        """Converte objetos Usuario ORM para UsuarioOut usando from_usuario()."""
+        # Quando vem do ORM (objeto), acessa atributos diretamente
+        if hasattr(data, "__class__") and not isinstance(data, dict):
+            prof = getattr(data, "professor", None)
+            alun = getattr(data, "aluno", None)
+            return {
+                "id":             data.id,
+                "status":         data.status,
+                "criado_em":      data.criado_em,
+                "respondido_em":  getattr(data, "respondido_em", None),
+                "professor":      UsuarioOut.from_usuario(prof) if prof else None,
+                "aluno":          UsuarioOut.from_usuario(alun) if alun else None,
+            }
+        return data
 
 class ResponderConviteRequest(BaseModel):
     aceitar: bool
