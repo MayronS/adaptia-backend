@@ -240,8 +240,9 @@ async def listar_quizzes_topico(
     for q in quizzes:
         questoes_ativas = [quest for quest in q.questoes if quest.ativo]
 
-        # Sorteia até QUESTOES_POR_QUIZ questões aleatórias sem repetição
-        selecionadas = random.sample(questoes_ativas, min(QUESTOES_POR_QUIZ, len(questoes_ativas)))
+        # Usa o campo do quiz; se None, usa todas as questões ativas
+        n = q.questoes_por_tentativa if q.questoes_por_tentativa else len(questoes_ativas)
+        selecionadas = random.sample(questoes_ativas, min(n, len(questoes_ativas)))
 
         q_out = QuizComQuestoesOut.model_validate(q)
         q_out.questoes = [
