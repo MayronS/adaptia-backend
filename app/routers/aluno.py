@@ -20,6 +20,7 @@ from app.schemas.schemas import (
     QuizComQuestoesOut, QuestaoOut, AlternativaOut,
     TentativaCreate, TentativaOut, RespostaQuestaoOut,
     AlternativaComGabaritoOut, MelhorTentativaOut,
+    ConviteOut, ResponderConviteRequest,
 )
 from app.services.auth_service import require_aluno
 from app.services.recomendacao_service import gerar_recomendacoes
@@ -532,14 +533,12 @@ async def _desbloquear_proximos(usuario_id: uuid.UUID, topico_concluido_id: uuid
 # CONVITES DO PROFESSOR (visão do aluno)
 # ══════════════════════════════════════════════════════════════════════════════
 
-@router.get("/convites", response_model=list["ConviteOut"])
+@router.get("/convites", response_model=list[ConviteOut])
 async def listar_convites(
     user: Usuario = Depends(require_aluno),
     db:   AsyncSession = Depends(get_db),
 ):
     """Retorna convites pendentes e histórico para o aluno."""
-    from app.models.models import VinculoProfessorAluno
-    from app.schemas.schemas import ConviteOut
     res = await db.execute(
         select(VinculoProfessorAluno)
         .options(selectinload(VinculoProfessorAluno.professor).selectinload(Usuario.perfis))
@@ -552,14 +551,11 @@ async def listar_convites(
 @router.patch("/convites/{vinculo_id}/responder")
 async def responder_convite(
     vinculo_id: uuid.UUID,
-    body: "ResponderConviteRequest",
+    body: ResponderConviteRequest,
     user: Usuario = Depends(require_aluno),
     db:   AsyncSession = Depends(get_db),
 ):
     """Aluno aceita ou recusa convite de orientação."""
-    from datetime import datetime
-    from app.models.models import VinculoProfessorAluno, StatusVinculo
-    from app.schemas.schemas import ConviteOut, ResponderConviteRequest
     res = await db.execute(
         select(VinculoProfessorAluno).where(
             VinculoProfessorAluno.id       == vinculo_id,
