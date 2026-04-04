@@ -115,3 +115,22 @@ async def require_professor(
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Usuário não encontrado")
     user.ultimo_acesso = datetime.utcnow()
     return user
+
+async def require_admin(
+    token: str = Depends(oauth2_scheme),
+    db:    AsyncSession = Depends(get_db),
+) -> Usuario:
+    """Exige que o perfil ATIVO nesta sessão seja admin."""
+    token_data = decode_token(token)
+    if token_data.perfil_ativo != PerfilUsuario.admin:
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Acesso restrito a administradores")
+    result = await db.execute(
+        select(Usuario)
+        .options(selectinload(Usuario.perfis))
+        .where(Usuario.id == token_data.usuario_id)
+    )
+    user = result.scalar_one_or_none()
+    if not user or not user.ativo:
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Usuário não encontrado")
+    user.ultimo_acesso = datetime.utcnow()
+    return user

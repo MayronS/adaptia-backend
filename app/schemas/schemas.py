@@ -231,3 +231,41 @@ class DashboardProfessorOut(BaseModel):
     alunos_ativos:  int
     precisam_apoio: int
     alunos:         list[AlunoResumoOut]
+
+
+# ── Admin: Create schemas ─────────────────────────────────────────────────────
+
+class MateriaCreate(BaseModel):
+    nome:      str           = Field(..., min_length=2, max_length=80)
+    descricao: str | None    = None
+    icone:     str | None    = Field(None, max_length=10)
+    cor:       str | None    = Field(None, max_length=7)
+    ordem:     int           = 0
+    ativo:     bool          = True
+
+class TopicoCreate(BaseModel):
+    titulo:            str           = Field(..., min_length=2, max_length=120)
+    descricao:         str | None    = None
+    ordem:             int           = 0
+    nivel_dificuldade: int           = Field(1, ge=1, le=5)
+    prerequisito_id:   uuid.UUID | None = None
+    ativo:             bool          = True
+
+class QuizCreate(BaseModel):
+    titulo:           str           = Field(..., min_length=2, max_length=120)
+    descricao:        str | None    = None
+    tempo_limite_seg: int | None    = None
+    pontuacao_maxima: int           = 100
+    tentativas_max:   int | None    = None
+    ativo:            bool          = True
+
+class AlternativaCreate(BaseModel):
+    texto:      str            = Field(..., min_length=1)
+    correta:    bool           = False
+    explicacao: str | None     = None
+
+class QuestaoCreate(BaseModel):
+    enunciado:    str                  = Field(..., min_length=5)
+    tipo:         TipoQuestao          = TipoQuestao.multipla_escolha
+    pontos:       int                  = Field(1, ge=1)
+    alternativas: list[AlternativaCreate] = Field(default_factory=list)
