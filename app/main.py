@@ -1,4 +1,3 @@
-import asyncio
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from contextlib import asynccontextmanager
@@ -12,28 +11,8 @@ from app.models import models  # noqa: F401
 
 settings = get_settings()
 
-# ── Keep-alive para o Neon não hibernar ──────────────────────────────────────
-# O Neon hiberna após ~5 min de inatividade. Esta task faz um ping leve
-# no banco a cada 4 minutos para manter o endpoint acordado durante o uso.
-_keepalive_task: asyncio.Task | None = None
-
-async def _neon_keepalive():
-    """Pinga o banco a cada 4 min para evitar hibernação do Neon."""
-    from sqlalchemy import text
-    from app.database import AsyncSessionLocal
-    while True:
-        await asyncio.sleep(240)  # 4 minutos
-        try:
-            async with AsyncSessionLocal() as session:
-                await session.execute(text("SELECT 1"))
-        except Exception:
-            pass  # silencia — se falhar, a próxima requisição real reconecta
-
-
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    global _keepalive_task
-
     # Cria tabelas e tipos ENUM automaticamente se não existirem
     async with engine.begin() as conn:
         await conn.run_sync(Base.metadata.create_all, checkfirst=True)
@@ -43,18 +22,8 @@ async def lifespan(app: FastAPI):
     _dummy_hash = hash_password("warmup")
     verify_password("warmup", _dummy_hash)
 
-    # Inicia keep-alive em background
-    _keepalive_task = asyncio.create_task(_neon_keepalive())
-
     yield
 
-    # Encerra graciosamente
-    if _keepalive_task:
-        _keepalive_task.cancel()
-        try:
-            await _keepalive_task
-        except asyncio.CancelledError:
-            pass
     await engine.dispose()
 
 
