@@ -96,6 +96,7 @@ async def listar_topicos(
 ):
     res = await db.execute(
         select(Topico)
+        .options(selectinload(Topico.materia))
         .where(Topico.materia_id == materia_id)
         .order_by(Topico.ordem, Topico.titulo)
     )
@@ -136,6 +137,8 @@ async def criar_topico(
 
     await db.commit()
     await db.refresh(topico)
+    # Carrega o relacionamento para evitar MissingGreenlet
+    await db.execute(select(Topico).options(selectinload(Topico.materia)).where(Topico.id == topico.id))
     return topico
 
 
@@ -146,7 +149,9 @@ async def editar_topico(
     _:    Usuario = Depends(require_admin),
     db:   AsyncSession = Depends(get_db),
 ):
-    res = await db.execute(select(Topico).where(Topico.id == topico_id))
+    res = await db.execute(
+        select(Topico).options(selectinload(Topico.materia)).where(Topico.id == topico_id)
+    )
     topico = res.scalar_one_or_none()
     if not topico:
         raise HTTPException(status_code=404, detail="Tópico não encontrado")
