@@ -116,8 +116,9 @@ class QuizOut(OrmBase):
     descricao:        str | None
     tempo_limite_seg: int | None
     pontuacao_maxima: int
-    tentativas_max:   int | None
-    ativo:            bool
+    tentativas_max:         int | None
+    questoes_por_tentativa: int | None = None
+    ativo:                  bool
 
 class QuizComQuestoesOut(QuizOut):
     questoes: list[QuestaoOut] = []
@@ -256,8 +257,9 @@ class QuizCreate(BaseModel):
     descricao:        str | None    = None
     tempo_limite_seg: int | None    = None
     pontuacao_maxima: int           = 100
-    tentativas_max:   int | None    = None
-    ativo:            bool          = True
+    tentativas_max:         int | None = None
+    questoes_por_tentativa: int | None = Field(None, ge=1, description='Quantas questões sortear por tentativa. None = todas.')
+    ativo:                  bool       = True
 
 class AlternativaCreate(BaseModel):
     texto:      str            = Field(..., min_length=1)
@@ -269,3 +271,22 @@ class QuestaoCreate(BaseModel):
     tipo:         TipoQuestao          = TipoQuestao.multipla_escolha
     pontos:       int                  = Field(1, ge=1)
     alternativas: list[AlternativaCreate] = Field(default_factory=list)
+
+
+# ── Vínculos Professor-Aluno ──────────────────────────────────────────────────
+
+from app.models.models import StatusVinculo
+
+class ConviteCreate(BaseModel):
+    aluno_email: EmailStr
+
+class ConviteOut(OrmBase):
+    id:            uuid.UUID
+    status:        StatusVinculo
+    criado_em:     datetime
+    respondido_em: datetime | None = None
+    professor:     UsuarioOut | None = None
+    aluno:         UsuarioOut | None = None
+
+class ResponderConviteRequest(BaseModel):
+    aceitar: bool

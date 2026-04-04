@@ -123,7 +123,8 @@ class Quiz(Base):
     descricao:        Mapped[str | None] = mapped_column(Text)
     tempo_limite_seg: Mapped[int | None] = mapped_column(Integer)
     pontuacao_maxima: Mapped[int]        = mapped_column(Integer, nullable=False, default=100)
-    tentativas_max:   Mapped[int | None] = mapped_column(SmallInteger)
+    tentativas_max:         Mapped[int | None] = mapped_column(SmallInteger)
+    questoes_por_tentativa: Mapped[int | None] = mapped_column(SmallInteger)  # None = todas
     ativo:            Mapped[bool]       = mapped_column(Boolean, nullable=False, default=True)
     criado_em:        Mapped[datetime]   = mapped_column(TIMESTAMP(timezone=True), nullable=False, default=datetime.utcnow)
 
@@ -227,3 +228,30 @@ class Recomendacao(Base):
 
     usuario: Mapped["Usuario"] = relationship(back_populates="recomendacoes")
     topico:  Mapped["Topico"]  = relationship(back_populates="recomendacoes")
+
+
+class StatusVinculo(str, enum.Enum):
+    pendente  = "pendente"
+    aceito    = "aceito"
+    recusado  = "recusado"
+
+
+class VinculoProfessorAluno(Base):
+    """
+    Relacionamento entre professor e aluno.
+    O professor convida; o aluno aceita ou recusa.
+    """
+    __tablename__ = "vinculos_professor_aluno"
+    __table_args__ = (
+        UniqueConstraint("professor_id", "aluno_id", name="uq_vinculo_prof_aluno"),
+    )
+
+    id:           Mapped[uuid.UUID]      = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    professor_id: Mapped[uuid.UUID]      = mapped_column(ForeignKey("usuarios.id", ondelete="CASCADE"), nullable=False)
+    aluno_id:     Mapped[uuid.UUID]      = mapped_column(ForeignKey("usuarios.id", ondelete="CASCADE"), nullable=False)
+    status:       Mapped[StatusVinculo]  = mapped_column(SAEnum(StatusVinculo, name="status_vinculo"), nullable=False, default=StatusVinculo.pendente)
+    criado_em:    Mapped[datetime]       = mapped_column(TIMESTAMP(timezone=True), nullable=False, default=datetime.utcnow)
+    respondido_em: Mapped[datetime|None] = mapped_column(TIMESTAMP(timezone=True), nullable=True)
+
+    professor: Mapped["Usuario"] = relationship("Usuario", foreign_keys=[professor_id])
+    aluno:     Mapped["Usuario"] = relationship("Usuario", foreign_keys=[aluno_id])

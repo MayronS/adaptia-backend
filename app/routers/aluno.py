@@ -9,6 +9,7 @@ from sqlalchemy.orm import selectinload
 
 from app.database import get_db
 from app.models.models import (
+    VinculoProfessorAluno, StatusVinculo,
     Usuario, Materia, Topico, Quiz, Questao, Alternativa,
     ProgressoTopico, TentativaQuiz, RespostaQuestao,
     Recomendacao, StatusProgresso
@@ -26,8 +27,6 @@ from app.services.recomendacao_service import gerar_recomendacoes
 router = APIRouter(prefix="/aluno", tags=["aluno"])
 
 # Número de questões sorteadas por quiz a cada tentativa
-QUESTOES_POR_QUIZ = 4
-
 # Pontuação mínima (%) para concluir tópico e desbloquear o próximo
 THRESHOLD_APROVACAO = 75
 
@@ -236,8 +235,6 @@ async def listar_quizzes_topico(
     quizzes = res.scalars().all()
 
     # Monta resposta sem gabarito — sorteia 4 questões aleatórias de todas as disponíveis
-    QUESTOES_POR_QUIZ = 4
-
     resultado = []
     for q in quizzes:
         questoes_ativas = [quest for quest in q.questoes if quest.ativo]
@@ -530,3 +527,53 @@ async def _desbloquear_proximos(usuario_id: uuid.UUID, topico_concluido_id: uuid
         prog = res2.scalar_one_or_none()
         if prog and prog.status == StatusProgresso.bloqueado:
             prog.status = StatusProgresso.disponivel
+
+# ══════════════════════════════════════════════════════════════════════════════
+# CONVITES DO PROFESSOR (visão do aluno)
+# ══════════════════════════════════════════════════════════════════════════════
+
+@router.get("/convites", response_model=list["ConviteOut"])
+async def listar_convites(
+    user: Usuario = Depends(require_aluno),
+    db:   AsyncSession = Depends(get_db),
+):
+    """Retorna convites pendentes e histórico para o aluno."""
+    from app.models.models import VinculoProfessorAluno
+    from app.schemas.schemas import ConviteOut
+    res = await db.execute(
+        select(VinculoProfessorAluno)
+        .options(selectinload(VinculoProfessorAluno.professor).selectinload(Usuario.perfis))
+        .where(VinculoProfessorAluno.aluno_id == user.id)
+        .order_by(VinculoProfessorAluno.criado_em.desc())
+    )
+    return res.scalars().all()
+
+
+@router.patch("/convites/{vinculo_id}/responder")
+async def responder_convite(
+    vinculo_id: uuid.UUID,
+    body: "ResponderConviteRequest",
+    user: Usuario = Depends(require_aluno),
+    db:   AsyncSession = Depends(get_db),
+):
+    """Aluno aceita ou recusa convite de orientação."""
+    from datetime import datetime
+    from app.models.models import VinculoProfessorAluno, StatusVinculo
+    from app.schemas.schemas import ConviteOut, ResponderConviteRequest
+    res = await db.execute(
+        select(VinculoProfessorAluno).where(
+            VinculoProfessorAluno.id       == vinculo_id,
+            VinculoProfessorAluno.aluno_id == user.id,
+        )
+    )
+    vinculo = res.scalar_one_or_none()
+    if not vinculo:
+        raise HTTPException(status_code=404, detail="Convite não encontrado")
+    if vinculo.status != StatusVinculo.pendente:
+        raise HTTPException(status_code=400, detail="Este convite já foi respondido")
+
+    vinculo.status       = StatusVinculo.aceito if body.aceitar else StatusVinculo.recusado
+    vinculo.respondido_em = datetime.utcnow()
+    await db.commit()
+    await db.refresh(vinculo)
+    return {"status": vinculo.status, "mensagem": "Convite aceito!" if body.aceitar else "Convite recusado."}
