@@ -1,6 +1,6 @@
 import uuid
 import enum
-from datetime import datetime
+from datetime import datetime, timezone
 from sqlalchemy import (
     String, Text, Boolean, Integer, SmallInteger,
     ForeignKey, Numeric, Enum as SAEnum, TIMESTAMP,
@@ -40,7 +40,7 @@ class Usuario(Base):
     email:         Mapped[str]             = mapped_column(String(180), nullable=False, unique=True)
     senha_hash:    Mapped[str]             = mapped_column(Text, nullable=False)
     ativo:         Mapped[bool]            = mapped_column(Boolean, nullable=False, default=True)
-    criado_em:     Mapped[datetime]        = mapped_column(TIMESTAMP(timezone=True), nullable=False, default=datetime.utcnow)
+    criado_em:     Mapped[datetime]        = mapped_column(TIMESTAMP(timezone=True), nullable=False, default=lambda: datetime.now(timezone.utc))
     ultimo_acesso: Mapped[datetime | None] = mapped_column(TIMESTAMP(timezone=True), nullable=True)
 
     # Perfis do usuário (pode ter aluno, professor, ou ambos)
@@ -72,7 +72,7 @@ class UsuarioPerfil(Base):
     usuario_id: Mapped[uuid.UUID]     = mapped_column(ForeignKey("usuarios.id", ondelete="CASCADE"), nullable=False)
     perfil:     Mapped[PerfilUsuario] = mapped_column(SAEnum(PerfilUsuario, name="perfil_usuario"), nullable=False)
     ativo:      Mapped[bool]          = mapped_column(Boolean, nullable=False, default=True)
-    criado_em:  Mapped[datetime]      = mapped_column(TIMESTAMP(timezone=True), nullable=False, default=datetime.utcnow)
+    criado_em:  Mapped[datetime]      = mapped_column(TIMESTAMP(timezone=True), nullable=False, default=lambda: datetime.now(timezone.utc))
 
     usuario: Mapped["Usuario"] = relationship(back_populates="perfis")
 
@@ -126,7 +126,7 @@ class Quiz(Base):
     tentativas_max:         Mapped[int | None] = mapped_column(SmallInteger)
     questoes_por_tentativa: Mapped[int | None] = mapped_column(SmallInteger)  # None = todas
     ativo:            Mapped[bool]       = mapped_column(Boolean, nullable=False, default=True)
-    criado_em:        Mapped[datetime]   = mapped_column(TIMESTAMP(timezone=True), nullable=False, default=datetime.utcnow)
+    criado_em:        Mapped[datetime]   = mapped_column(TIMESTAMP(timezone=True), nullable=False, default=lambda: datetime.now(timezone.utc))
 
     topico:     Mapped["Topico"]              = relationship(back_populates="quizzes")
     questoes:   Mapped[list["Questao"]]       = relationship(back_populates="quiz", cascade="all, delete-orphan")
@@ -191,7 +191,7 @@ class TentativaQuiz(Base):
     acertos:         Mapped[int]        = mapped_column(SmallInteger, nullable=False, default=0)
     total_questoes:  Mapped[int]        = mapped_column(SmallInteger, nullable=False, default=0)
     tempo_gasto_seg: Mapped[int | None] = mapped_column(Integer)
-    realizado_em:    Mapped[datetime]   = mapped_column(TIMESTAMP(timezone=True), nullable=False, default=datetime.utcnow)
+    realizado_em:    Mapped[datetime]   = mapped_column(TIMESTAMP(timezone=True), nullable=False, default=lambda: datetime.now(timezone.utc))
 
     usuario:   Mapped["Usuario"]               = relationship(back_populates="tentativas")
     quiz:      Mapped["Quiz"]                  = relationship(back_populates="tentativas")
@@ -224,7 +224,7 @@ class Recomendacao(Base):
     score_relevancia: Mapped[float]      = mapped_column(Numeric(5, 4), nullable=False, default=0)
     motivo:           Mapped[str | None] = mapped_column(String(120))
     visualizada:      Mapped[bool]       = mapped_column(Boolean, nullable=False, default=False)
-    gerada_em:        Mapped[datetime]   = mapped_column(TIMESTAMP(timezone=True), nullable=False, default=datetime.utcnow)
+    gerada_em:        Mapped[datetime]   = mapped_column(TIMESTAMP(timezone=True), nullable=False, default=lambda: datetime.now(timezone.utc))
 
     usuario: Mapped["Usuario"] = relationship(back_populates="recomendacoes")
     topico:  Mapped["Topico"]  = relationship(back_populates="recomendacoes")
@@ -250,8 +250,124 @@ class VinculoProfessorAluno(Base):
     professor_id: Mapped[uuid.UUID]      = mapped_column(ForeignKey("usuarios.id", ondelete="CASCADE"), nullable=False)
     aluno_id:     Mapped[uuid.UUID]      = mapped_column(ForeignKey("usuarios.id", ondelete="CASCADE"), nullable=False)
     status:       Mapped[StatusVinculo]  = mapped_column(SAEnum(StatusVinculo, name="status_vinculo"), nullable=False, default=StatusVinculo.pendente)
-    criado_em:    Mapped[datetime]       = mapped_column(TIMESTAMP(timezone=True), nullable=False, default=datetime.utcnow)
+    criado_em:    Mapped[datetime]       = mapped_column(TIMESTAMP(timezone=True), nullable=False, default=lambda: datetime.now(timezone.utc))
     respondido_em: Mapped[datetime|None] = mapped_column(TIMESTAMP(timezone=True), nullable=True)
 
     professor: Mapped["Usuario"] = relationship("Usuario", foreign_keys=[professor_id])
     aluno:     Mapped["Usuario"] = relationship("Usuario", foreign_keys=[aluno_id])
+
+
+# ══════════════════════════════════════════════════════════════════════════════
+# TURMAS
+# ══════════════════════════════════════════════════════════════════════════════
+
+class Turma(Base):
+    """Turma criada por um professor para agrupar alunos."""
+    __tablename__ = "turmas"
+
+    id:           Mapped[uuid.UUID]       = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    professor_id: Mapped[uuid.UUID]       = mapped_column(ForeignKey("usuarios.id", ondelete="CASCADE"), nullable=False)
+    nome:         Mapped[str]             = mapped_column(String(120), nullable=False)
+    descricao:    Mapped[str | None]      = mapped_column(Text)
+    ativo:        Mapped[bool]            = mapped_column(Boolean, nullable=False, default=True)
+    criado_em:    Mapped[datetime]        = mapped_column(TIMESTAMP(timezone=True), nullable=False, default=lambda: datetime.now(timezone.utc))
+
+    professor: Mapped["Usuario"]          = relationship("Usuario", foreign_keys=[professor_id])
+    alunos:    Mapped[list["TurmaAluno"]] = relationship(back_populates="turma", cascade="all, delete-orphan")
+    quizzes:   Mapped[list["TurmaQuiz"]] = relationship(back_populates="turma", cascade="all, delete-orphan")
+
+
+class TurmaAluno(Base):
+    """Vínculo entre aluno e turma."""
+    __tablename__ = "turma_alunos"
+    __table_args__ = (UniqueConstraint("turma_id", "aluno_id", name="uq_turma_aluno"),)
+
+    id:        Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    turma_id:  Mapped[uuid.UUID] = mapped_column(ForeignKey("turmas.id", ondelete="CASCADE"), nullable=False)
+    aluno_id:  Mapped[uuid.UUID] = mapped_column(ForeignKey("usuarios.id", ondelete="CASCADE"), nullable=False)
+    criado_em: Mapped[datetime]  = mapped_column(TIMESTAMP(timezone=True), nullable=False, default=lambda: datetime.now(timezone.utc))
+
+    turma: Mapped["Turma"]   = relationship(back_populates="alunos")
+    aluno: Mapped["Usuario"] = relationship("Usuario", foreign_keys=[aluno_id])
+
+
+class TurmaQuiz(Base):
+    """Quiz criado pelo professor exclusivamente para uma turma."""
+    __tablename__ = "turma_quizzes"
+
+    id:               Mapped[uuid.UUID]  = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    turma_id:         Mapped[uuid.UUID]  = mapped_column(ForeignKey("turmas.id", ondelete="CASCADE"), nullable=False)
+    titulo:           Mapped[str]        = mapped_column(String(120), nullable=False)
+    descricao:        Mapped[str | None] = mapped_column(Text)
+    tempo_limite_seg: Mapped[int | None] = mapped_column(Integer)
+    ativo:            Mapped[bool]       = mapped_column(Boolean, nullable=False, default=True)
+    criado_em:        Mapped[datetime]   = mapped_column(TIMESTAMP(timezone=True), nullable=False, default=lambda: datetime.now(timezone.utc))
+
+    turma:    Mapped["Turma"]                  = relationship(back_populates="quizzes")
+    questoes: Mapped[list["TurmaQuestao"]]     = relationship(back_populates="quiz", cascade="all, delete-orphan")
+    tentativas: Mapped[list["TentativaTurmaQuiz"]] = relationship(back_populates="quiz", cascade="all, delete-orphan")
+
+
+class TurmaQuestao(Base):
+    """Questão de um quiz de turma."""
+    __tablename__ = "turma_questoes"
+
+    id:        Mapped[uuid.UUID]   = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    quiz_id:   Mapped[uuid.UUID]   = mapped_column(ForeignKey("turma_quizzes.id", ondelete="CASCADE"), nullable=False)
+    enunciado: Mapped[str]         = mapped_column(Text, nullable=False)
+    tipo:      Mapped[TipoQuestao] = mapped_column(SAEnum(TipoQuestao, name="tipo_questao"), nullable=False, default=TipoQuestao.multipla_escolha)
+    pontos:    Mapped[int]         = mapped_column(SmallInteger, nullable=False, default=1)
+    ordem:     Mapped[int]         = mapped_column(SmallInteger, nullable=False, default=0)
+
+    quiz:         Mapped["TurmaQuiz"]                  = relationship(back_populates="questoes")
+    alternativas: Mapped[list["TurmaAlternativa"]]     = relationship(back_populates="questao", cascade="all, delete-orphan")
+    respostas:    Mapped[list["TurmaRespostaQuestao"]] = relationship(back_populates="questao")
+
+
+class TurmaAlternativa(Base):
+    """Alternativa de uma questão de turma."""
+    __tablename__ = "turma_alternativas"
+
+    id:         Mapped[uuid.UUID]  = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    questao_id: Mapped[uuid.UUID]  = mapped_column(ForeignKey("turma_questoes.id", ondelete="CASCADE"), nullable=False)
+    texto:      Mapped[str]        = mapped_column(Text, nullable=False)
+    correta:    Mapped[bool]       = mapped_column(Boolean, nullable=False, default=False)
+    explicacao: Mapped[str | None] = mapped_column(Text)
+    ordem:      Mapped[int]        = mapped_column(SmallInteger, nullable=False, default=0)
+
+    questao:   Mapped["TurmaQuestao"]              = relationship(back_populates="alternativas")
+    respostas: Mapped[list["TurmaRespostaQuestao"]] = relationship(back_populates="alternativa")
+
+
+class TentativaTurmaQuiz(Base):
+    """Tentativa de um aluno em um quiz de turma."""
+    __tablename__ = "tentativas_turma_quiz"
+
+    id:              Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    quiz_id:         Mapped[uuid.UUID] = mapped_column(ForeignKey("turma_quizzes.id", ondelete="CASCADE"), nullable=False)
+    aluno_id:        Mapped[uuid.UUID] = mapped_column(ForeignKey("usuarios.id", ondelete="CASCADE"), nullable=False)
+    pontuacao:       Mapped[int]       = mapped_column(Integer, nullable=False, default=0)
+    acertos:         Mapped[int]       = mapped_column(SmallInteger, nullable=False, default=0)
+    total_questoes:  Mapped[int]       = mapped_column(SmallInteger, nullable=False, default=0)
+    tempo_gasto_seg: Mapped[int | None]= mapped_column(Integer)
+    realizado_em:    Mapped[datetime]  = mapped_column(TIMESTAMP(timezone=True), nullable=False, default=lambda: datetime.now(timezone.utc))
+
+    quiz:      Mapped["TurmaQuiz"]                 = relationship(back_populates="tentativas")
+    aluno:     Mapped["Usuario"]                   = relationship("Usuario", foreign_keys=[aluno_id])
+    respostas: Mapped[list["TurmaRespostaQuestao"]] = relationship(back_populates="tentativa", cascade="all, delete-orphan")
+
+
+class TurmaRespostaQuestao(Base):
+    """Resposta de uma questão numa tentativa de turma."""
+    __tablename__ = "turma_respostas_questoes"
+    __table_args__ = (UniqueConstraint("tentativa_id", "questao_id", name="uq_turma_resp_questao"),)
+
+    id:             Mapped[uuid.UUID]      = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    tentativa_id:   Mapped[uuid.UUID]      = mapped_column(ForeignKey("tentativas_turma_quiz.id", ondelete="CASCADE"), nullable=False)
+    questao_id:     Mapped[uuid.UUID]      = mapped_column(ForeignKey("turma_questoes.id", ondelete="CASCADE"), nullable=False)
+    alternativa_id: Mapped[uuid.UUID|None] = mapped_column(ForeignKey("turma_alternativas.id", ondelete="SET NULL"), nullable=True)
+    correta:        Mapped[bool]           = mapped_column(Boolean, nullable=False, default=False)
+
+    tentativa:   Mapped["TentativaTurmaQuiz"]    = relationship(back_populates="respostas")
+    questao:     Mapped["TurmaQuestao"]          = relationship(back_populates="respostas")
+    alternativa: Mapped["TurmaAlternativa|None"] = relationship(back_populates="respostas")

@@ -4,7 +4,7 @@ from contextlib import asynccontextmanager
 
 from app.config import get_settings
 from app.database import engine, Base
-from app.routers import auth, aluno, professor, admin
+from app.routers import auth, aluno, professor, admin, turmas
 
 # Importa todos os models para garantir que estão registrados no metadata
 from app.models import models  # noqa: F401
@@ -48,6 +48,7 @@ app.include_router(auth.router)
 app.include_router(aluno.router)
 app.include_router(professor.router)
 app.include_router(admin.router)
+app.include_router(turmas.router)
 
 
 # ── Health check ──────────────────────────────────────────────────────────────

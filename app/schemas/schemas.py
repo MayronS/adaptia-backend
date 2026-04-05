@@ -258,7 +258,7 @@ class QuizCreate(BaseModel):
     tempo_limite_seg: int | None    = None
     pontuacao_maxima: int           = 100
     tentativas_max:         int | None = None
-    questoes_por_tentativa: int | None = Field(None, ge=1, description='Quantas questões sortear por tentativa. None = todas.')
+    questoes_por_tentativa: int | None = Field(default=None, description='Quantas questões sortear por tentativa. None = todas.')
     ativo:                  bool       = True
 
 class AlternativaCreate(BaseModel):
@@ -310,3 +310,118 @@ class ConviteOut(BaseModel):
 
 class ResponderConviteRequest(BaseModel):
     aceitar: bool
+
+
+# ══════════════════════════════════════════════════════════════════════════════
+# TURMAS
+# ══════════════════════════════════════════════════════════════════════════════
+
+class TurmaCreate(BaseModel):
+    nome:      str          = Field(..., min_length=2, max_length=120)
+    descricao: str | None   = None
+
+class TurmaAlternativaOut(OrmBase):
+    id:         uuid.UUID
+    texto:      str
+    correta:    bool
+    explicacao: str | None = None
+    ordem:      int
+
+class TurmaAlternativaCreate(BaseModel):
+    texto:      str        = Field(..., min_length=1)
+    correta:    bool       = False
+    explicacao: str | None = None
+
+class TurmaQuestaoOut(OrmBase):
+    id:           uuid.UUID
+    enunciado:    str
+    tipo:         TipoQuestao
+    pontos:       int
+    ordem:        int
+    alternativas: list[TurmaAlternativaOut] = []
+
+class TurmaQuestaoCreate(BaseModel):
+    enunciado:    str                       = Field(..., min_length=5)
+    tipo:         TipoQuestao               = TipoQuestao.multipla_escolha
+    pontos:       int                       = Field(1, ge=1)
+    alternativas: list[TurmaAlternativaCreate] = Field(default_factory=list)
+
+class TurmaQuizOut(OrmBase):
+    id:               uuid.UUID
+    turma_id:         uuid.UUID
+    titulo:           str
+    descricao:        str | None
+    tempo_limite_seg: int | None
+    ativo:            bool
+    criado_em:        datetime
+    questoes:         list[TurmaQuestaoOut] = []
+
+class TurmaQuizCreate(BaseModel):
+    titulo:           str          = Field(..., min_length=2, max_length=120)
+    descricao:        str | None   = None
+    tempo_limite_seg: int | None   = None
+    ativo:            bool         = True
+
+class TurmaAlunoOut(OrmBase):
+    id:        uuid.UUID
+    aluno_id:  uuid.UUID
+    criado_em: datetime
+    aluno:     UsuarioOut | None = None
+
+    @model_validator(mode="before")
+    @classmethod
+    def conv(cls, data):
+        if hasattr(data, "__class__") and not isinstance(data, dict):
+            aluno = getattr(data, "aluno", None)
+            return {
+                "id":        data.id,
+                "aluno_id":  data.aluno_id,
+                "criado_em": data.criado_em,
+                "aluno":     UsuarioOut.from_usuario(aluno) if aluno else None,
+            }
+        return data
+
+class TurmaOut(OrmBase):
+    id:         uuid.UUID
+    nome:       str
+    descricao:  str | None
+    ativo:      bool
+    criado_em:  datetime
+    professor:  UsuarioOut | None = None
+    alunos:     list[TurmaAlunoOut] = []
+    quizzes:    list[TurmaQuizOut]  = []
+
+    @model_validator(mode="before")
+    @classmethod
+    def conv_professor(cls, data):
+        if hasattr(data, "__class__") and not isinstance(data, dict):
+            prof = getattr(data, "professor", None)
+            return {
+                "id":         data.id,
+                "nome":       data.nome,
+                "descricao":  getattr(data, "descricao", None),
+                "ativo":      data.ativo,
+                "criado_em":  data.criado_em,
+                "professor":  UsuarioOut.from_usuario(prof) if prof else None,
+                "alunos":     getattr(data, "alunos", []),
+                "quizzes":    getattr(data, "quizzes", []),
+            }
+        return data
+
+class TurmaRespostaItem(BaseModel):
+    questao_id:     uuid.UUID
+    alternativa_id: uuid.UUID | None = None
+
+class TentativaTurmaCreate(BaseModel):
+    quiz_id:         uuid.UUID
+    tempo_gasto_seg: int | None = None
+    respostas:       list[TurmaRespostaItem]
+
+class TentativaTurmaOut(OrmBase):
+    id:              uuid.UUID
+    quiz_id:         uuid.UUID
+    pontuacao:       int
+    acertos:         int
+    total_questoes:  int
+    tempo_gasto_seg: int | None
+    realizado_em:    datetime
