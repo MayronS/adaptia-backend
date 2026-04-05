@@ -1,5 +1,5 @@
 import uuid
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select
@@ -74,7 +74,7 @@ async def dashboard(
     media_turma = round(
         sum(r.pontuacao_media for r in resumos) / max(len(resumos), 1), 1
     )
-    sete_dias = datetime.utcnow() - timedelta(days=7)
+    sete_dias = datetime.now(timezone.utc) - timedelta(days=7)
     alunos_ativos = sum(
         1 for r in resumos
         if r.ultimo_acesso and r.ultimo_acesso >= sete_dias
@@ -191,6 +191,27 @@ async def listar_quizzes(
 # CONVITES
 # ══════════════════════════════════════════════════════════════════════════════
 
+
+@router.get("/alunos-vinculados", response_model=list[UsuarioOut])
+async def listar_alunos_vinculados(
+    user: Usuario = Depends(require_professor),
+    db:   AsyncSession = Depends(get_db),
+):
+    """Retorna todos os alunos com vínculo aceito com este professor."""
+    res = await db.execute(
+        select(Usuario)
+        .join(VinculoProfessorAluno, VinculoProfessorAluno.aluno_id == Usuario.id)
+        .options(selectinload(Usuario.perfis))
+        .where(
+            VinculoProfessorAluno.professor_id == user.id,
+            VinculoProfessorAluno.status       == StatusVinculo.aceito,
+            Usuario.ativo == True,
+        )
+        .order_by(Usuario.nome)
+    )
+    alunos = res.scalars().all()
+    return [UsuarioOut.from_usuario(a) for a in alunos]
+
 @router.post("/convites", response_model=ConviteOut, status_code=201)
 async def enviar_convite(
     body: ConviteCreate,
@@ -230,7 +251,7 @@ async def enviar_convite(
             raise HTTPException(status_code=409, detail="Convite já enviado, aguardando resposta do aluno")
         # recusado → permite reenviar
         existente.status = StatusVinculo.pendente
-        existente.criado_em = datetime.utcnow()
+        existente.criado_em = datetime.now(timezone.utc)
         existente.respondido_em = None
         await db.commit()
         # Recarrega com relações para serialização correta
