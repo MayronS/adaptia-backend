@@ -1,6 +1,4 @@
-"""
-Serviço de geração de quizzes via Google Gemini API (gratuita).
-"""
+
 import json
 import logging
 import httpx
@@ -8,7 +6,7 @@ from app.config import get_settings
 
 logger = logging.getLogger(__name__)
 
-GEMINI_URL = "https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent"
+GEMINI_URL = "https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent"
 
 
 async def gerar_quiz_topico(topico_nome: str, materia_nome: str, nivel: int, n_questoes: int = 5) -> list[dict]:
