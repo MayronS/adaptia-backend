@@ -668,8 +668,12 @@ async def gerar_quiz_ia(
 
     try:
         questoes = await gerar_quiz_topico(topico_nome, materia_nome, nivel, n_questoes=5)
+    except ValueError as e:
+        raise HTTPException(status_code=502, detail=str(e))
     except Exception as e:
-        raise HTTPException(status_code=502, detail=f"Erro ao gerar quiz com IA: {str(e)}")
+        import logging
+        logging.getLogger(__name__).error(f"Erro inesperado no quiz-ia: {e}", exc_info=True)
+        raise HTTPException(status_code=502, detail=f"Erro interno ao gerar quiz: {str(e)}")
 
     # Monta o quiz no formato do frontend
     quiz = {
