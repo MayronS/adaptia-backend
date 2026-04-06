@@ -2,7 +2,7 @@ from __future__ import annotations
 import uuid
 from datetime import datetime
 from pydantic import BaseModel, EmailStr, Field, ConfigDict, field_validator, model_validator
-from app.models.models import PerfilUsuario, StatusProgresso, TipoQuestao
+from app.models.models import PerfilUsuario, StatusProgresso, TipoQuestao, StatusVinculo
 
 
 # ── Helpers ──────────────────────────────────────────────────────────────────
@@ -274,8 +274,6 @@ class QuestaoCreate(BaseModel):
 
 
 # ── Vínculos Professor-Aluno ──────────────────────────────────────────────────
-
-from app.models.models import StatusVinculo
 
 class ConviteCreate(BaseModel):
     aluno_email: EmailStr
