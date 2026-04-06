@@ -10,6 +10,7 @@ class Settings(BaseSettings):
     APP_NAME: str = "AdaptIA"
     APP_ENV: str = "development"
     CORS_ORIGINS: str = "http://localhost:5173"
+    GEMINI_API_KEY: str = ""
 
     @property
     def cors_origins_list(self) -> list[str]:

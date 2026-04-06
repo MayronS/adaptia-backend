@@ -1,4 +1,4 @@
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 import uuid
 import random
 
@@ -59,7 +59,7 @@ async def dashboard(
     # Sequência de dias consecutivos com estudo
     datas = sorted({t.realizado_em.date() for t in tentativas}, reverse=True)
     sequencia = 0
-    hoje = datetime.utcnow().date()
+    hoje = datetime.now(timezone.utc).date()
     for i, data in enumerate(datas):
         if data == hoje - timedelta(days=i):
             sequencia += 1
@@ -376,7 +376,7 @@ async def submeter_tentativa(
     if progresso:
         if progresso.status == StatusProgresso.disponivel:
             progresso.status      = StatusProgresso.em_progresso
-            progresso.iniciado_em = datetime.utcnow()
+            progresso.iniciado_em = datetime.now(timezone.utc)
 
         # Busca todos os quizzes do tópico
         res_quizzes = await db.execute(
@@ -413,7 +413,7 @@ async def submeter_tentativa(
         # Conclui o tópico somente quando a média geral >= THRESHOLD_APROVACAO (75%)
         if media_topico >= THRESHOLD_APROVACAO:
             progresso.status       = StatusProgresso.concluido
-            progresso.concluido_em = datetime.utcnow()
+            progresso.concluido_em = datetime.now(timezone.utc)
             await _desbloquear_proximos(user.id, quiz.topico_id, db)
         else:
             # Garante que volta para em_progresso se a média caiu abaixo do threshold
@@ -570,7 +570,130 @@ async def responder_convite(
         raise HTTPException(status_code=400, detail="Este convite já foi respondido")
 
     vinculo.status       = StatusVinculo.aceito if body.aceitar else StatusVinculo.recusado
-    vinculo.respondido_em = datetime.utcnow()
+    vinculo.respondido_em = datetime.now(timezone.utc)
     await db.commit()
     await db.refresh(vinculo)
     return {"status": vinculo.status, "mensagem": "Convite aceito!" if body.aceitar else "Convite recusado."}
+
+# ══════════════════════════════════════════════════════════════════════════════
+# ANÁLISE DE ERROS + QUIZ IA (Gemini)
+# ══════════════════════════════════════════════════════════════════════════════
+
+@router.get("/analise-erros")
+async def analise_erros(
+    user: Usuario = Depends(require_aluno),
+    db:   AsyncSession = Depends(get_db),
+):
+    """
+    Analisa as tentativas do aluno e retorna os tópicos com pior desempenho,
+    ordenados por taxa de erro, com dados suficientes para gerar quizzes de revisão.
+    """
+    from sqlalchemy.orm import selectinload as sil
+    from app.models.models import Topico
+
+    # Busca todas as tentativas com respostas
+    res = await db.execute(
+        select(TentativaQuiz)
+        .options(
+            sil(TentativaQuiz.quiz).selectinload(Quiz.topico).selectinload(Topico.materia),
+            sil(TentativaQuiz.respostas),
+        )
+        .where(TentativaQuiz.usuario_id == user.id)
+    )
+    tentativas = res.scalars().all()
+
+    if not tentativas:
+        return {"topicos_fracos": [], "total_tentativas": 0}
+
+    # Agrupa por tópico
+    from collections import defaultdict
+    por_topico: dict = defaultdict(lambda: {"acertos": 0, "total": 0, "topico": None, "materia": None, "nivel": 1})
+
+    for t in tentativas:
+        if not t.quiz or not t.quiz.topico:
+            continue
+        tid = t.quiz.topico_id
+        por_topico[tid]["acertos"] += t.acertos
+        por_topico[tid]["total"]   += t.total_questoes
+        por_topico[tid]["topico"]  = t.quiz.topico.titulo
+        por_topico[tid]["materia"] = t.quiz.topico.materia.nome if t.quiz.topico.materia else "Geral"
+        por_topico[tid]["nivel"]   = t.quiz.topico.nivel_dificuldade
+        por_topico[tid]["topico_id"] = str(tid)
+
+    # Calcula taxa de erro e filtra tópicos com pelo menos 3 questões respondidas
+    resultados = []
+    for tid, dados in por_topico.items():
+        if dados["total"] < 3:
+            continue
+        taxa_acerto = round(dados["acertos"] / dados["total"] * 100, 1)
+        taxa_erro   = round(100 - taxa_acerto, 1)
+        resultados.append({
+            "topico_id":   dados["topico_id"],
+            "topico":      dados["topico"],
+            "materia":     dados["materia"],
+            "nivel":       dados["nivel"],
+            "taxa_acerto": taxa_acerto,
+            "taxa_erro":   taxa_erro,
+            "total_respondidas": dados["total"],
+        })
+
+    # Ordena por maior taxa de erro, pega top 5
+    resultados.sort(key=lambda x: x["taxa_erro"], reverse=True)
+    topicos_fracos = resultados[:5]
+
+    return {
+        "topicos_fracos": topicos_fracos,
+        "total_tentativas": len(tentativas),
+    }
+
+
+@router.post("/quiz-ia")
+async def gerar_quiz_ia(
+    body: dict,
+    user: Usuario = Depends(require_aluno),
+    db:   AsyncSession = Depends(get_db),
+):
+    """
+    Recebe um tópico fraco e chama o Gemini para gerar 5 questões de revisão.
+    Retorna o quiz completo sem persistir no banco.
+    """
+    from app.services.gemini_service import gerar_quiz_topico
+
+    topico_nome = body.get("topico", "")
+    materia_nome = body.get("materia", "")
+    nivel = body.get("nivel", 1)
+
+    if not topico_nome:
+        raise HTTPException(status_code=400, detail="topico é obrigatório")
+
+    try:
+        questoes = await gerar_quiz_topico(topico_nome, materia_nome, nivel, n_questoes=5)
+    except Exception as e:
+        raise HTTPException(status_code=502, detail=f"Erro ao gerar quiz com IA: {str(e)}")
+
+    # Monta o quiz no formato do frontend
+    quiz = {
+        "id": f"ia_{topico_nome.replace(' ', '_')}",
+        "titulo": f"Revisão — {topico_nome}",
+        "topico": topico_nome,
+        "materia": materia_nome,
+        "gerado_por_ia": True,
+        "questoes": [
+            {
+                "id": f"q_{i}",
+                "enunciado": q["enunciado"],
+                "tipo": "multipla_escolha",
+                "alternativas": [
+                    {
+                        "id": f"q_{i}_a_{j}",
+                        "texto": a["texto"],
+                        "correta": a.get("correta", False),
+                        "explicacao": a.get("explicacao", ""),
+                    }
+                    for j, a in enumerate(q.get("alternativas", []))
+                ],
+            }
+            for i, q in enumerate(questoes)
+        ],
+    }
+    return quiz
