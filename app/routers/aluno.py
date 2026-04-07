@@ -701,3 +701,118 @@ async def gerar_quiz_ia(
         ],
     }
     return quiz
+
+
+# ══════════════════════════════════════════════════════════════════════════════
+# QUIZ DIÁRIO
+# ══════════════════════════════════════════════════════════════════════════════
+
+@router.get("/quiz-diario")
+async def get_quiz_diario(
+    user: Usuario = Depends(require_aluno),
+    db:   AsyncSession = Depends(get_db),
+):
+    """
+    Retorna o quiz diário do aluno:
+    - Identifica o tópico com maior taxa de erro real
+    - Sorteia 5 questões aleatórias desse tópico
+    - Se não houver tentativas ainda, usa o primeiro tópico disponível
+    """
+    from collections import defaultdict
+    from app.models.models import Topico
+
+    # ── 1. Busca tentativas do aluno para calcular taxa de erro por tópico ──
+    res = await db.execute(
+        select(TentativaQuiz)
+        .options(selectinload(TentativaQuiz.quiz))
+        .where(TentativaQuiz.usuario_id == user.id)
+    )
+    tentativas = res.scalars().all()
+
+    acertos_por_topico: dict = defaultdict(int)
+    total_por_topico:   dict = defaultdict(int)
+
+    for t in tentativas:
+        if t.quiz:
+            tid = t.quiz.topico_id
+            acertos_por_topico[tid] += t.acertos
+            total_por_topico[tid]   += t.total_questoes
+
+    # ── 2. Tópicos disponíveis/em_progresso ──
+    res = await db.execute(
+        select(ProgressoTopico)
+        .options(selectinload(ProgressoTopico.topico))
+        .where(
+            ProgressoTopico.usuario_id == user.id,
+            ProgressoTopico.status.in_([StatusProgresso.disponivel, StatusProgresso.em_progresso]),
+        )
+    )
+    progressos = res.scalars().all()
+
+    if not progressos:
+        return {"disponivel": False, "motivo": "Nenhum tópico disponível ainda."}
+
+    # ── 3. Escolhe o tópico com maior taxa de erro (ou o primeiro se sem dados) ──
+    melhor_topico_id = None
+    maior_taxa_erro  = -1.0
+
+    for p in progressos:
+        tid   = p.topico_id
+        total = total_por_topico.get(tid, 0)
+        if total == 0:
+            taxa_erro = 0.5  # nunca tentado → score médio
+        else:
+            taxa_erro = 1.0 - acertos_por_topico.get(tid, 0) / total
+
+        if taxa_erro > maior_taxa_erro:
+            maior_taxa_erro  = taxa_erro
+            melhor_topico_id = tid
+            melhor_topico    = p.topico
+
+    if not melhor_topico_id:
+        return {"disponivel": False, "motivo": "Nenhum tópico elegível."}
+
+    # ── 4. Busca quizzes do tópico com questões ──
+    res = await db.execute(
+        select(Quiz)
+        .options(selectinload(Quiz.questoes).selectinload(Questao.alternativas))
+        .where(Quiz.topico_id == melhor_topico_id, Quiz.ativo == True)
+    )
+    quizzes = res.scalars().all()
+
+    # Junta todas as questões ativas de todos os quizzes do tópico
+    todas_questoes = []
+    for q in quizzes:
+        todas_questoes.extend([quest for quest in q.questoes if quest.ativo])
+
+    if not todas_questoes:
+        return {"disponivel": False, "motivo": "Nenhuma questão disponível para o tópico recomendado."}
+
+    # ── 5. Sorteia até 5 questões ──
+    selecionadas = random.sample(todas_questoes, min(5, len(todas_questoes)))
+
+    taxa_acerto_pct = round((1.0 - maior_taxa_erro) * 100, 1) if maior_taxa_erro != 0.5 else None
+
+    return {
+        "disponivel":     True,
+        "topico_id":      str(melhor_topico_id),
+        "topico_nome":    melhor_topico.titulo if melhor_topico else "",
+        "taxa_erro_pct":  round(maior_taxa_erro * 100, 1) if maior_taxa_erro != 0.5 else None,
+        "taxa_acerto_pct": taxa_acerto_pct,
+        "questoes": [
+            {
+                "id": str(q.id),
+                "enunciado": q.enunciado,
+                "tipo": q.tipo,
+                "alternativas": [
+                    {
+                        "id":    str(a.id),
+                        "texto": a.texto,
+                        "correta": a.correta,
+                    }
+                    for a in random.sample(q.alternativas, len(q.alternativas))
+                ],
+            }
+            for q in selecionadas
+        ],
+    }
