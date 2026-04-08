@@ -218,6 +218,9 @@ class DashboardAlunoOut(BaseModel):
     sequencia_dias:   int
     progressos:       list[ProgressoOut]
     recomendacoes:    list[RecomendacaoOut]
+    acertos_semana:   list[int] = []   # acertos reais dos últimos 7 dias (dom→sáb)
+    exercicios_semana: int = 0         # total de exercícios feitos nos últimos 7 dias
+    melhor_sequencia:  int = 0         # maior sequência histórica
 
 class AlunoResumoOut(BaseModel):
     usuario:          UsuarioOut

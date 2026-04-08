@@ -56,15 +56,36 @@ async def dashboard(
     acertos_total    = sum(t.acertos for t in tentativas)
     taxa_acerto      = round(acertos_total / max(total_exercicios, 1) * 100, 1)
 
+    hoje = datetime.now(timezone.utc).date()
+
     # Sequência de dias consecutivos com estudo
     datas = sorted({t.realizado_em.date() for t in tentativas}, reverse=True)
     sequencia = 0
-    hoje = datetime.now(timezone.utc).date()
     for i, data in enumerate(datas):
         if data == hoje - timedelta(days=i):
             sequencia += 1
         else:
             break
+
+    # Maior sequência histórica
+    melhor_sequencia = 0
+    sequencia_atual  = 0
+    for i, data in enumerate(datas):
+        if i == 0 or data == datas[i-1] - timedelta(days=1):
+            sequencia_atual += 1
+            melhor_sequencia = max(melhor_sequencia, sequencia_atual)
+        else:
+            sequencia_atual = 1
+
+    # Acertos reais dos últimos 7 dias (índice 0 = 6 dias atrás, índice 6 = hoje)
+    acertos_semana = [0] * 7
+    exercicios_semana = 0
+    for t in tentativas:
+        data_tent = t.realizado_em.date()
+        diff = (hoje - data_tent).days
+        if 0 <= diff <= 6:
+            acertos_semana[6 - diff] += t.acertos
+            exercicios_semana += t.total_questoes
 
     # Recomendações ativas
     res = await db.execute(
@@ -82,6 +103,9 @@ async def dashboard(
         taxa_acerto_pct=taxa_acerto,
         total_exercicios=total_exercicios,
         sequencia_dias=sequencia,
+        melhor_sequencia=melhor_sequencia,
+        acertos_semana=acertos_semana,
+        exercicios_semana=exercicios_semana,
         progressos=[ProgressoOut.model_validate(p) for p in progressos],
         recomendacoes=[RecomendacaoOut.model_validate(r) for r in recomendacoes],
     )
