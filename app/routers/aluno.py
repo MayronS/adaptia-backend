@@ -98,7 +98,7 @@ async def dashboard(
     recomendacoes = res.scalars().all()
 
     return DashboardAlunoOut(
-        usuario=UsuarioOut.model_validate(user),
+        usuario=UsuarioOut.from_usuario(user),
         pontuacao_geral=pontuacao_geral,
         taxa_acerto_pct=taxa_acerto,
         total_exercicios=total_exercicios,
