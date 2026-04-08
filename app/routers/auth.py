@@ -2,7 +2,8 @@ from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select
 from sqlalchemy.orm import selectinload
-from datetime import datetime
+from datetime import datetime, timezone
+
 
 from app.database import get_db
 from app.models.models import Usuario, UsuarioPerfil, ProgressoTopico, Topico, StatusProgresso, PerfilUsuario
@@ -90,7 +91,7 @@ async def login(body: LoginRequest, db: AsyncSession = Depends(get_db)):
                 )
             perfil_sessao = body.perfil
 
-    user.ultimo_acesso = datetime.utcnow()
+    user.ultimo_acesso = datetime.now(timezone.utc)
     token = create_access_token(user.id, perfil_sessao)
 
     return Token(
@@ -219,3 +220,11 @@ async def _inicializar_progresso_aluno(usuario_id, db: AsyncSession):
             topico_id=topico.id,
             status=status_inicial,
         ))
+
+
+@router.get("/me", response_model=UsuarioOut)
+async def me(
+    user: Usuario = Depends(get_current_user),
+):
+    """Retorna os dados do usuário autenticado."""
+    return UsuarioOut.from_usuario(user)
