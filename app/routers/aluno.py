@@ -216,6 +216,37 @@ async def adicionar_materia(
     return {"ok": True, "materia": materia.nome, "topicos_adicionados": criados}
 
 
+@router.delete("/materias/{materia_id}/remover", status_code=200)
+async def remover_materia(
+    materia_id: uuid.UUID,
+    user: Usuario      = Depends(require_aluno),
+    db:   AsyncSession = Depends(get_db),
+):
+    """Remove todos os progressos do aluno nos tópicos de uma matéria."""
+    # Busca tópicos da matéria
+    res = await db.execute(
+        select(Topico).where(Topico.materia_id == materia_id, Topico.ativo == True)
+    )
+    topicos = res.scalars().all()
+    topico_ids = [t.id for t in topicos]
+
+    if not topico_ids:
+        raise HTTPException(status_code=404, detail="Matéria não encontrada")
+
+    # Remove os progressos do aluno nesses tópicos
+    res = await db.execute(
+        select(ProgressoTopico).where(
+            ProgressoTopico.usuario_id == user.id,
+            ProgressoTopico.topico_id.in_(topico_ids),
+        )
+    )
+    progressos = res.scalars().all()
+    for p in progressos:
+        await db.delete(p)
+
+    return {"ok": True, "topicos_removidos": len(progressos)}
+
+
 # ── Quiz ──────────────────────────────────────────────────────────────────────
 
 @router.get("/topicos/{topico_id}/quizzes", response_model=list[QuizComQuestoesOut])
