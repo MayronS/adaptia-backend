@@ -6,7 +6,7 @@ from datetime import datetime, timezone
 
 
 from app.database import get_db
-from app.models.models import Usuario, UsuarioPerfil, ProgressoTopico, Topico, StatusProgresso, PerfilUsuario
+from app.models.models import Usuario, UsuarioPerfil, PerfilUsuario
 from app.schemas.schemas import (
     LoginRequest, Token, UsuarioCreate, UsuarioOut,
     AdicionarPerfilRequest,
@@ -139,10 +139,6 @@ async def register(body: UsuarioCreate, db: AsyncSession = Depends(get_db)):
         db.add(novo_perfil)
         await db.flush()
 
-        # Se for aluno, inicializa progresso nos tópicos
-        if body.perfil == PerfilUsuario.aluno:
-            await _inicializar_progresso_aluno(existing.id, db)
-
         await db.commit()
         await db.refresh(existing)
         return UsuarioOut.from_usuario(existing)
@@ -158,9 +154,6 @@ async def register(body: UsuarioCreate, db: AsyncSession = Depends(get_db)):
 
     perfil_obj = UsuarioPerfil(usuario_id=user.id, perfil=body.perfil)
     db.add(perfil_obj)
-
-    if body.perfil == PerfilUsuario.aluno:
-        await _inicializar_progresso_aluno(user.id, db)
 
     await db.commit()
     await db.refresh(user, ["perfis"])
@@ -198,29 +191,9 @@ async def adicionar_perfil(
     novo_perfil = UsuarioPerfil(usuario_id=user.id, perfil=body.perfil)
     db.add(novo_perfil)
 
-    if body.perfil == PerfilUsuario.aluno:
-        await _inicializar_progresso_aluno(user.id, db)
-
     await db.commit()
     await db.refresh(user, ["perfis"])
     return UsuarioOut.from_usuario(user)
-
-
-async def _inicializar_progresso_aluno(usuario_id, db: AsyncSession):
-    """Cria registros de progresso para todos os tópicos ativos."""
-    res_topicos = await db.execute(select(Topico).where(Topico.ativo == True))
-    for topico in res_topicos.scalars().all():
-        status_inicial = (
-            StatusProgresso.disponivel
-            if topico.prerequisito_id is None
-            else StatusProgresso.bloqueado
-        )
-        db.add(ProgressoTopico(
-            usuario_id=usuario_id,
-            topico_id=topico.id,
-            status=status_inicial,
-        ))
-
 
 @router.get("/me", response_model=UsuarioOut)
 async def me(
