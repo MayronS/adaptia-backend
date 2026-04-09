@@ -120,7 +120,7 @@ async def listar_topicos(
     db:   AsyncSession = Depends(get_db),
 ):
     """Lista tópicos com o status de progresso do aluno."""
-    query = select(Topico).where(Topico.ativo == True)
+    query = select(ProgressoTopico).where(ProgressoTopico.usuario_id == user.id)
     if materia_id:
         query = query.where(Topico.materia_id == materia_id)
     query = query.order_by(Topico.ordem).options(selectinload(Topico.materia))
