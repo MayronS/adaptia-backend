@@ -119,49 +119,38 @@ async def listar_topicos(
     user: Usuario = Depends(require_aluno),
     db:   AsyncSession = Depends(get_db),
 ):
-    """Lista tópicos com o status de progresso do aluno."""
-    query = select(ProgressoTopico).where(ProgressoTopico.usuario_id == user.id)
-    if materia_id:
-        query = query.where(Topico.materia_id == materia_id)
-    query = query.order_by(Topico.ordem).options(selectinload(Topico.materia))
-
-    res     = await db.execute(query)
-    topicos = res.scalars().all()
-
-    # Busca progressos existentes do aluno
+    """Lista apenas os tópicos que o aluno adicionou explicitamente."""
+    # Busca IDs dos tópicos que o aluno tem progresso
     res = await db.execute(
         select(ProgressoTopico).where(ProgressoTopico.usuario_id == user.id)
     )
-    prog_map = {p.topico_id: p for p in res.scalars().all()}
+    progressos = res.scalars().all()
 
-    # Cria progresso para tópicos novos que ainda não têm registro
-    novos = []
-    for t in topicos:
-        if t.id not in prog_map:
-            status_inicial = (
-                StatusProgresso.disponivel
-                if t.prerequisito_id is None
-                else StatusProgresso.bloqueado
-            )
-            novo = ProgressoTopico(
-                usuario_id=user.id,
-                topico_id=t.id,
-                status=status_inicial,
-            )
-            db.add(novo)
-            novos.append((t.id, novo))
+    if not progressos:
+        return []
 
-    if novos:
-        await db.flush()
-        for topico_id, novo in novos:
-            prog_map[topico_id] = novo
+    prog_map = {p.topico_id: p for p in progressos}
+    topico_ids = list(prog_map.keys())
+
+    # Busca os tópicos com matéria carregada
+    query = (
+        select(Topico)
+        .options(selectinload(Topico.materia))
+        .where(Topico.id.in_(topico_ids), Topico.ativo == True)
+        .order_by(Topico.ordem)
+    )
+    if materia_id:
+        query = query.where(Topico.materia_id == materia_id)
+
+    res = await db.execute(query)
+    topicos = res.scalars().all()
 
     resultado = []
     for t in topicos:
-        prog = prog_map.get(t.id)
+        prog = prog_map[t.id]
         item = TopicoComProgressoOut.model_validate(t)
-        item.status    = prog.status    if prog else None
-        item.pontuacao = prog.pontuacao if prog else None
+        item.status    = prog.status
+        item.pontuacao = prog.pontuacao
         resultado.append(item)
 
     return resultado
