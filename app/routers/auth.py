@@ -148,6 +148,8 @@ async def register(body: UsuarioCreate, db: AsyncSession = Depends(get_db)):
         nome=body.nome,
         email=body.email,
         senha_hash=hash_password(body.password),
+        palavra_chave_hash=hash_password(body.palavra_chave) if body.palavra_chave else None,
+        palavra_chave_dica=body.palavra_chave_dica or None,
     )
     db.add(user)
     await db.flush()  # gera o ID
@@ -229,3 +231,71 @@ async def alterar_senha(
     await db.commit()
 
     return {"mensagem": "Senha alterada com sucesso"}
+
+@router.post("/recuperar-senha", status_code=200)
+async def recuperar_senha(
+    body: dict,
+    db:   AsyncSession = Depends(get_db),
+):
+    """Recupera acesso redefinindo a senha via nome + e-mail + palavra-chave."""
+    nome         = (body.get("nome") or "").strip()
+    email        = (body.get("email") or "").strip().lower()
+    palavra_chave = (body.get("palavra_chave") or "").strip()
+    nova_senha   = (body.get("nova_senha") or "").strip()
+
+    if not all([nome, email, palavra_chave, nova_senha]):
+        raise HTTPException(status_code=422, detail="Todos os campos são obrigatórios")
+
+    if len(nova_senha) < 6:
+        raise HTTPException(status_code=422, detail="A nova senha deve ter pelo menos 6 caracteres")
+
+    res = await db.execute(
+        _carregar_usuario_com_perfis(select(Usuario).where(Usuario.email == email))
+    )
+    user = res.scalar_one_or_none()
+
+    # Mesma mensagem para não revelar se e-mail existe
+    erro_generico = HTTPException(status_code=400, detail="Dados incorretos. Verifique nome, e-mail e palavra-chave.")
+
+    if not user:
+        raise erro_generico
+
+    # Verifica nome (case-insensitive)
+    if user.nome.strip().lower() != nome.lower():
+        raise erro_generico
+
+    # Verifica palavra-chave
+    if not user.palavra_chave_hash or not verify_password(palavra_chave, user.palavra_chave_hash):
+        raise erro_generico
+
+    user.senha_hash = hash_password(nova_senha)
+    await db.commit()
+
+    return {"mensagem": "Senha redefinida com sucesso! Faça login com sua nova senha."}
+
+
+@router.post("/palavra-chave", response_model=UsuarioOut, status_code=200)
+async def salvar_palavra_chave(
+    body: dict,
+    user: Usuario      = Depends(get_current_user),
+    db:   AsyncSession = Depends(get_db),
+):
+    """Cria ou edita a palavra-chave de recuperação e sua dica."""
+    palavra_chave = (body.get("palavra_chave") or "").strip()
+    dica          = (body.get("dica") or "").strip()
+
+    if not palavra_chave:
+        raise HTTPException(status_code=422, detail="A palavra-chave não pode ser vazia")
+
+    if len(palavra_chave) < 3:
+        raise HTTPException(status_code=422, detail="A palavra-chave deve ter pelo menos 3 caracteres")
+
+    if len(dica) > 200:
+        raise HTTPException(status_code=422, detail="A dica deve ter no máximo 200 caracteres")
+
+    user.palavra_chave_hash = hash_password(palavra_chave)
+    user.palavra_chave_dica = dica if dica else None
+
+    await db.commit()
+    await db.refresh(user, ["perfis"])
+    return UsuarioOut.from_usuario(user)

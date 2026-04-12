@@ -43,19 +43,23 @@ class TokenData(BaseModel):
 # ── Usuário ──────────────────────────────────────────────────────────────────
 
 class UsuarioCreate(BaseModel):
-    nome:     str           = Field(..., min_length=2, max_length=120)
-    email:    EmailStr
-    password: str           = Field(..., min_length=6)
-    perfil:   PerfilUsuario = PerfilUsuario.aluno
+    nome:          str           = Field(..., min_length=2, max_length=120)
+    email:         EmailStr
+    password:      str           = Field(..., min_length=6)
+    perfil:        PerfilUsuario = PerfilUsuario.aluno
+    palavra_chave: str | None    = Field(None, min_length=3, max_length=100)
+    palavra_chave_dica: str | None = Field(None, max_length=200)
 
 class UsuarioOut(OrmBase):
-    id:            uuid.UUID
-    nome:          str
-    email:         str
-    perfis:        list[PerfilUsuario] = []  # lista de todos os perfis ativos
-    ativo:         bool
-    criado_em:     datetime
-    ultimo_acesso: datetime | None = None
+    id:                 uuid.UUID
+    nome:               str
+    email:              str
+    perfis:             list[PerfilUsuario] = []
+    ativo:              bool
+    criado_em:          datetime
+    ultimo_acesso:      datetime | None = None
+    palavra_chave_dica: str | None = None
+    tem_palavra_chave:  bool = False
 
     @classmethod
     def from_usuario(cls, u: object) -> "UsuarioOut":
@@ -68,6 +72,8 @@ class UsuarioOut(OrmBase):
             ativo=u.ativo,
             criado_em=u.criado_em,
             ultimo_acesso=u.ultimo_acesso,
+            palavra_chave_dica=u.palavra_chave_dica,
+            tem_palavra_chave=u.palavra_chave_hash is not None,
         )
 
 

@@ -40,6 +40,8 @@ class Usuario(Base):
     email:         Mapped[str]             = mapped_column(String(180), nullable=False, unique=True)
     senha_hash:    Mapped[str]             = mapped_column(Text, nullable=False)
     ativo:         Mapped[bool]            = mapped_column(Boolean, nullable=False, default=True)
+    palavra_chave_hash: Mapped[str | None]  = mapped_column(Text, nullable=True)
+    palavra_chave_dica: Mapped[str | None]  = mapped_column(String(200), nullable=True)
     criado_em:     Mapped[datetime]        = mapped_column(TIMESTAMP(timezone=True), nullable=False, default=lambda: datetime.now(timezone.utc))
     ultimo_acesso: Mapped[datetime | None] = mapped_column(TIMESTAMP(timezone=True), nullable=True)
 
