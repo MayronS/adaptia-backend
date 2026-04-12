@@ -160,6 +160,7 @@ async def register(body: UsuarioCreate, db: AsyncSession = Depends(get_db)):
     return UsuarioOut.from_usuario(user)
 
 
+
 @router.post("/adicionar-perfil", response_model=UsuarioOut)
 async def adicionar_perfil(
     body: AdicionarPerfilRequest,
@@ -201,3 +202,30 @@ async def me(
 ):
     """Retorna os dados do usuário autenticado."""
     return UsuarioOut.from_usuario(user)
+
+@router.post("/alterar-senha", status_code=200)
+async def alterar_senha(
+    body: dict,
+    user: Usuario      = Depends(get_current_user),
+    db:   AsyncSession = Depends(get_db),
+):
+    """Altera a senha do usuário autenticado. Exige a senha atual para confirmar."""
+    senha_atual = body.get("senha_atual", "")
+    nova_senha  = body.get("nova_senha", "")
+
+    if not senha_atual or not nova_senha:
+        raise HTTPException(status_code=422, detail="Senha atual e nova senha são obrigatórias")
+
+    if len(nova_senha) < 6:
+        raise HTTPException(status_code=422, detail="A nova senha deve ter pelo menos 6 caracteres")
+
+    if not verify_password(senha_atual, user.senha_hash):
+        raise HTTPException(status_code=400, detail="Senha atual incorreta")
+
+    if senha_atual == nova_senha:
+        raise HTTPException(status_code=400, detail="A nova senha deve ser diferente da atual")
+
+    user.senha_hash = hash_password(nova_senha)
+    await db.commit()
+
+    return {"mensagem": "Senha alterada com sucesso"}
