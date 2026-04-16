@@ -299,3 +299,20 @@ async def salvar_palavra_chave(
     await db.commit()
     await db.refresh(user, ["perfis"])
     return UsuarioOut.from_usuario(user)
+
+@router.get("/palavra-chave-dica", status_code=200)
+async def obter_dica_palavra_chave(
+    email: str,
+    db:    AsyncSession = Depends(get_db),
+):
+    """Retorna a dica da palavra-chave para um e-mail (sem autenticação)."""
+    res = await db.execute(
+        select(Usuario).where(Usuario.email == email.strip().lower())
+    )
+    user = res.scalar_one_or_none()
+
+    # Não revela se o e-mail existe ou não
+    if not user or not user.palavra_chave_hash:
+        return {"dica": None}
+
+    return {"dica": user.palavra_chave_dica}
