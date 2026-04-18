@@ -236,6 +236,7 @@ class AlunoResumoOut(BaseModel):
     ultimo_acesso:    datetime | None
 
 class DashboardProfessorOut(BaseModel):
+    usuario:        UsuarioOut
     media_turma:    float
     total_alunos:   int
     alunos_ativos:  int

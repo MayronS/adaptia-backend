@@ -81,6 +81,7 @@ async def dashboard(
     )
 
     return DashboardProfessorOut(
+        usuario=UsuarioOut.from_usuario(user),
         media_turma=media_turma,
         total_alunos=len(alunos),
         alunos_ativos=alunos_ativos,
