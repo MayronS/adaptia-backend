@@ -751,21 +751,31 @@ async def gerar_quiz_ia(
 # QUIZ DIÁRIO
 # ══════════════════════════════════════════════════════════════════════════════
 
+# ══════════════════════════════════════════════════════════════════════════════
+# QUIZ DIÁRIO
+# ══════════════════════════════════════════════════════════════════════════════
+
 @router.get("/quiz-diario")
 async def get_quiz_diario(
     user: Usuario = Depends(require_aluno),
     db:   AsyncSession = Depends(get_db),
 ):
     """
-    Retorna o quiz diário do aluno:
+    Retorna o quiz diário do aluno gerado pelo Gemini:
+    - Verifica no banco se o aluno já fez o quiz hoje (UTC)
     - Identifica o tópico com maior taxa de erro real
-    - Sorteia 5 questões aleatórias desse tópico
-    - Se não houver tentativas ainda, usa o primeiro tópico disponível
+    - Gera 5 questões via Gemini baseadas nesse tópico
+    - Registra a data no banco ao gerar (não ao responder)
     """
     from collections import defaultdict
-    from app.models.models import Topico
+    from app.services.gemini_service import gerar_quiz_topico
 
-    # ── 1. Busca tentativas do aluno para calcular taxa de erro por tópico ──
+    # ── 1. Verifica se já fez hoje (controle no banco, não no frontend) ──
+    hoje = datetime.now(timezone.utc).date()
+    if user.ultimo_quiz_diario and user.ultimo_quiz_diario.date() == hoje:
+        return {"disponivel": False, "motivo": "Quiz diário já realizado hoje. Volte amanhã!"}
+
+    # ── 2. Calcula taxa de erro por tópico com base nas tentativas ──
     res = await db.execute(
         select(TentativaQuiz)
         .options(selectinload(TentativaQuiz.quiz))
@@ -782,10 +792,12 @@ async def get_quiz_diario(
             acertos_por_topico[tid] += t.acertos
             total_por_topico[tid]   += t.total_questoes
 
-    # ── 2. Tópicos disponíveis/em_progresso ──
+    # ── 3. Tópicos disponíveis/em_progresso ──
     res = await db.execute(
         select(ProgressoTopico)
-        .options(selectinload(ProgressoTopico.topico))
+        .options(
+            selectinload(ProgressoTopico.topico).selectinload(Topico.materia)
+        )
         .where(
             ProgressoTopico.usuario_id == user.id,
             ProgressoTopico.status.in_([StatusProgresso.disponivel, StatusProgresso.em_progresso]),
@@ -796,67 +808,67 @@ async def get_quiz_diario(
     if not progressos:
         return {"disponivel": False, "motivo": "Nenhum tópico disponível ainda."}
 
-    # ── 3. Escolhe o tópico com maior taxa de erro (ou o primeiro se sem dados) ──
+    # ── 4. Escolhe o tópico com maior taxa de erro ──
+    melhor_topico    = None
     melhor_topico_id = None
     maior_taxa_erro  = -1.0
 
     for p in progressos:
         tid   = p.topico_id
         total = total_por_topico.get(tid, 0)
-        if total == 0:
-            taxa_erro = 0.5  # nunca tentado → score médio
-        else:
-            taxa_erro = 1.0 - acertos_por_topico.get(tid, 0) / total
+        taxa_erro = 0.5 if total == 0 else 1.0 - acertos_por_topico.get(tid, 0) / total
 
         if taxa_erro > maior_taxa_erro:
             maior_taxa_erro  = taxa_erro
             melhor_topico_id = tid
             melhor_topico    = p.topico
 
-    if not melhor_topico_id:
+    if not melhor_topico:
         return {"disponivel": False, "motivo": "Nenhum tópico elegível."}
 
-    # ── 4. Busca quizzes do tópico com questões ──
-    res = await db.execute(
-        select(Quiz)
-        .options(selectinload(Quiz.questoes).selectinload(Questao.alternativas))
-        .where(Quiz.topico_id == melhor_topico_id, Quiz.ativo == True)
-    )
-    quizzes = res.scalars().all()
+    topico_nome  = melhor_topico.titulo
+    materia_nome = melhor_topico.materia.nome if melhor_topico.materia else ""
+    nivel        = melhor_topico.nivel_dificuldade or 1
 
-    # Junta todas as questões ativas de todos os quizzes do tópico
-    todas_questoes = []
-    for q in quizzes:
-        todas_questoes.extend([quest for quest in q.questoes if quest.ativo])
+    # ── 5. Gera questões via Gemini ──
+    try:
+        questoes_raw = await gerar_quiz_topico(topico_nome, materia_nome, nivel, n_questoes=5)
+    except ValueError as e:
+        raise HTTPException(status_code=502, detail=str(e))
+    except Exception as e:
+        import logging
+        logging.getLogger(__name__).error(f"Erro ao gerar quiz diário via Gemini: {e}", exc_info=True)
+        raise HTTPException(status_code=502, detail=f"Erro ao gerar quiz: {str(e)}")
 
-    if not todas_questoes:
-        return {"disponivel": False, "motivo": "Nenhuma questão disponível para o tópico recomendado."}
-
-    # ── 5. Sorteia até 5 questões ──
-    selecionadas = random.sample(todas_questoes, min(5, len(todas_questoes)))
+    # ── 6. Registra no banco que o aluno fez o quiz hoje ──
+    user.ultimo_quiz_diario = datetime.now(timezone.utc)
+    await db.commit()
 
     taxa_acerto_pct = round((1.0 - maior_taxa_erro) * 100, 1) if maior_taxa_erro != 0.5 else None
 
     return {
-        "disponivel":     True,
-        "topico_id":      str(melhor_topico_id),
-        "topico_nome":    melhor_topico.titulo if melhor_topico else "",
-        "taxa_erro_pct":  round(maior_taxa_erro * 100, 1) if maior_taxa_erro != 0.5 else None,
+        "disponivel":      True,
+        "topico_id":       str(melhor_topico_id),
+        "topico_nome":     topico_nome,
+        "materia_nome":    materia_nome,
+        "taxa_erro_pct":   round(maior_taxa_erro * 100, 1) if maior_taxa_erro != 0.5 else None,
         "taxa_acerto_pct": taxa_acerto_pct,
+        "gerado_por_ia":   True,
         "questoes": [
             {
-                "id": str(q.id),
-                "enunciado": q.enunciado,
-                "tipo": q.tipo,
+                "id":        f"q_{i}",
+                "enunciado": q["enunciado"],
+                "tipo":      "multipla_escolha",
                 "alternativas": [
                     {
-                        "id":    str(a.id),
-                        "texto": a.texto,
-                        "correta": a.correta,
+                        "id":        f"q_{i}_a_{j}",
+                        "texto":     a["texto"],
+                        "correta":   a.get("correta", False),
+                        "explicacao": a.get("explicacao", ""),
                     }
-                    for a in random.sample(q.alternativas, len(q.alternativas))
+                    for j, a in enumerate(q.get("alternativas", []))
                 ],
             }
-            for q in selecionadas
+            for i, q in enumerate(questoes_raw)
         ],
     }
