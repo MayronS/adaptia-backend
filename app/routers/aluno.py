@@ -874,14 +874,24 @@ async def get_quiz_diario(
         ],
     }
 
-    # ── 7. Registra no banco APÓS montar tudo com sucesso ──
+    return resposta
+
+
+@router.post("/quiz-diario/concluir", status_code=200)
+async def concluir_quiz_diario(
+    user: Usuario = Depends(require_aluno),
+    db:   AsyncSession = Depends(get_db),
+):
+    """
+    Chamado pelo frontend quando o aluno finaliza e submete o quiz diário.
+    Só então registra no banco que o quiz foi realizado hoje.
+    """
     try:
         user.ultimo_quiz_diario = datetime.now(timezone.utc)
         await db.commit()
     except Exception as e:
         import logging
-        logging.getLogger(__name__).warning(f"Não foi possível gravar ultimo_quiz_diario: {e}")
-        # Não bloqueia: o aluno recebe o quiz mesmo se o registro falhar
+        logging.getLogger(__name__).warning(f"Erro ao gravar ultimo_quiz_diario: {e}")
         await db.rollback()
-
-    return resposta
+        raise HTTPException(status_code=500, detail="Erro ao registrar conclusão do quiz.")
+    return {"ok": True}
