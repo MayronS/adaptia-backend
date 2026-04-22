@@ -770,10 +770,13 @@ async def get_quiz_diario(
     from collections import defaultdict
     from app.services.gemini_service import gerar_quiz_topico
 
-    # ── 1. Verifica se já fez hoje (controle no banco, não no frontend) ──
+    # ── 1. Verifica se já fez hoje — busca direto do banco para evitar cache da sessão ──
     hoje = datetime.now(timezone.utc).date()
     try:
-        ultimo = user.ultimo_quiz_diario
+        res_user = await db.execute(
+            select(Usuario.ultimo_quiz_diario).where(Usuario.id == user.id)
+        )
+        ultimo = res_user.scalar_one_or_none()
         if ultimo and ultimo.date() == hoje:
             return {"disponivel": False, "motivo": "Quiz diário já realizado hoje. Volte amanhã!"}
     except Exception:
@@ -885,9 +888,14 @@ async def concluir_quiz_diario(
     """
     Chamado pelo frontend quando o aluno finaliza e submete o quiz diário.
     Só então registra no banco que o quiz foi realizado hoje.
+    Usa UPDATE direto para garantir que a alteração seja persistida corretamente.
     """
     try:
-        user.ultimo_quiz_diario = datetime.now(timezone.utc)
+        await db.execute(
+            update(Usuario)
+            .where(Usuario.id == user.id)
+            .values(ultimo_quiz_diario=datetime.now(timezone.utc))
+        )
         await db.commit()
     except Exception as e:
         import logging
