@@ -82,15 +82,18 @@ class UsuarioPerfil(Base):
 class Materia(Base):
     __tablename__ = "materias"
 
-    id:        Mapped[uuid.UUID]  = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
-    nome:      Mapped[str]        = mapped_column(String(80), nullable=False, unique=True)
-    descricao: Mapped[str | None] = mapped_column(Text)
-    icone:     Mapped[str | None] = mapped_column(String(10))
-    cor:       Mapped[str | None] = mapped_column(String(7))
-    ordem:     Mapped[int]        = mapped_column(SmallInteger, nullable=False, default=0)
-    ativo:     Mapped[bool]       = mapped_column(Boolean, nullable=False, default=True)
+    id:             Mapped[uuid.UUID]      = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    nome:           Mapped[str]            = mapped_column(String(80), nullable=False, unique=True)
+    descricao:      Mapped[str | None]     = mapped_column(Text)
+    icone:          Mapped[str | None]     = mapped_column(String(10))
+    cor:            Mapped[str | None]     = mapped_column(String(7))
+    ordem:          Mapped[int]            = mapped_column(SmallInteger, nullable=False, default=0)
+    ativo:          Mapped[bool]           = mapped_column(Boolean, nullable=False, default=True)
+    # NULL = criada pelo admin; preenchido = criada pelo professor com esse id
+    criado_por_id:  Mapped[uuid.UUID|None] = mapped_column(ForeignKey("usuarios.id", ondelete="SET NULL"), nullable=True)
 
-    topicos: Mapped[list["Topico"]] = relationship(back_populates="materia", cascade="all, delete-orphan")
+    topicos:    Mapped[list["Topico"]]  = relationship(back_populates="materia", cascade="all, delete-orphan")
+    criado_por: Mapped["Usuario|None"] = relationship("Usuario", foreign_keys=[criado_por_id])
 
 
 class Topico(Base):

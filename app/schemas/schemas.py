@@ -87,12 +87,27 @@ class AdicionarPerfilRequest(BaseModel):
 # ── Matéria ───────────────────────────────────────────────────────────────────
 
 class MateriaOut(OrmBase):
-    id:        uuid.UUID
-    nome:      str
-    descricao: str | None
-    icone:     str | None
-    cor:       str | None
-    ordem:     int
+    id:                uuid.UUID
+    nome:              str
+    descricao:         str | None
+    icone:             str | None
+    cor:               str | None
+    ordem:             int
+    criado_por_id:     uuid.UUID | None = None
+    criado_por_nome:   str | None = None
+
+    @classmethod
+    def from_orm_with_autor(cls, m: object) -> "MateriaOut":
+        return cls(
+            id=m.id,
+            nome=m.nome,
+            descricao=m.descricao,
+            icone=m.icone,
+            cor=m.cor,
+            ordem=m.ordem,
+            criado_por_id=m.criado_por_id,
+            criado_por_nome=m.criado_por.nome if m.criado_por else None,
+        )
 
 
 # ── Tópico ───────────────────────────────────────────────────────────────────
