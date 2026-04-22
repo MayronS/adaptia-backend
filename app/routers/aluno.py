@@ -761,28 +761,46 @@ async def get_quiz_diario(
     db:   AsyncSession = Depends(get_db),
 ):
     """
-    Retorna o quiz diário do aluno gerado pelo Gemini:
-    - Verifica no banco se o aluno já fez o quiz hoje (UTC)
-    - Identifica o tópico com maior taxa de erro real
-    - Gera 5 questões via Gemini baseadas nesse tópico
-    - Registra a data no banco ao gerar (não ao responder)
+    Retorna o quiz diário do aluno:
+    - Se já concluiu hoje → indisponível
+    - Se já foi gerado hoje (cache no banco) → retorna o cache sem chamar o Gemini
+    - Caso contrário → gera via Gemini, salva cache e retorna
     """
+    import json
     from collections import defaultdict
     from app.services.gemini_service import gerar_quiz_topico
 
-    # ── 1. Verifica se já fez hoje — busca direto do banco para evitar cache da sessão ──
     hoje = datetime.now(timezone.utc).date()
-    try:
-        res_user = await db.execute(
-            select(Usuario.ultimo_quiz_diario).where(Usuario.id == user.id)
-        )
-        ultimo = res_user.scalar_one_or_none()
-        if ultimo and ultimo.date() == hoje:
-            return {"disponivel": False, "motivo": "Quiz diário já realizado hoje. Volte amanhã!"}
-    except Exception:
-        pass  # coluna ainda não existe no banco (migration pendente) — deixa passar
 
-    # ── 2. Calcula taxa de erro por tópico com base nas tentativas ──
+    # ── 1. Busca campos de controle direto do banco (evita cache de sessão) ──
+    try:
+        res_ctrl = await db.execute(
+            select(
+                Usuario.ultimo_quiz_diario,
+                Usuario.quiz_diario_cache,
+                Usuario.quiz_diario_gerado_em,
+            ).where(Usuario.id == user.id)
+        )
+        row = res_ctrl.one_or_none()
+        ultimo_quiz    = row[0] if row else None
+        cache_json     = row[1] if row else None
+        cache_gerado   = row[2] if row else None
+    except Exception:
+        # Colunas ainda não existem (migration pendente) — continua sem cache
+        ultimo_quiz = cache_json = cache_gerado = None
+
+    # ── 2. Já concluiu hoje? ──
+    if ultimo_quiz and ultimo_quiz.date() == hoje:
+        return {"disponivel": False, "motivo": "Quiz diário já realizado hoje. Volte amanhã!"}
+
+    # ── 3. Já existe cache gerado hoje? Retorna sem chamar o Gemini ──
+    if cache_json and cache_gerado and cache_gerado.date() == hoje:
+        try:
+            return json.loads(cache_json)
+        except Exception:
+            pass  # cache corrompido — gera um novo abaixo
+
+    # ── 4. Calcula taxa de erro por tópico ──
     res = await db.execute(
         select(TentativaQuiz)
         .options(selectinload(TentativaQuiz.quiz))
@@ -799,7 +817,7 @@ async def get_quiz_diario(
             acertos_por_topico[tid] += t.acertos
             total_por_topico[tid]   += t.total_questoes
 
-    # ── 3. Tópicos disponíveis/em_progresso ──
+    # ── 5. Tópicos disponíveis/em_progresso ──
     res = await db.execute(
         select(ProgressoTopico)
         .options(
@@ -815,14 +833,14 @@ async def get_quiz_diario(
     if not progressos:
         return {"disponivel": False, "motivo": "Nenhum tópico disponível ainda."}
 
-    # ── 4. Escolhe o tópico com maior taxa de erro ──
+    # ── 6. Escolhe o tópico com maior taxa de erro ──
     melhor_topico    = None
     melhor_topico_id = None
     maior_taxa_erro  = -1.0
 
     for p in progressos:
-        tid   = p.topico_id
-        total = total_por_topico.get(tid, 0)
+        tid       = p.topico_id
+        total     = total_por_topico.get(tid, 0)
         taxa_erro = 0.5 if total == 0 else 1.0 - acertos_por_topico.get(tid, 0) / total
 
         if taxa_erro > maior_taxa_erro:
@@ -837,7 +855,7 @@ async def get_quiz_diario(
     materia_nome = melhor_topico.materia.nome if melhor_topico.materia else ""
     nivel        = melhor_topico.nivel_dificuldade or 1
 
-    # ── 5. Gera questões via Gemini ──
+    # ── 7. Gera questões via Gemini ──
     try:
         questoes_raw = await gerar_quiz_topico(topico_nome, materia_nome, nivel, n_questoes=5)
     except ValueError as e:
@@ -847,7 +865,7 @@ async def get_quiz_diario(
         logging.getLogger(__name__).error(f"Erro ao gerar quiz diário via Gemini: {e}", exc_info=True)
         raise HTTPException(status_code=502, detail=f"Erro ao gerar quiz: {str(e)}")
 
-    # ── 6. Monta resposta ──
+    # ── 8. Monta resposta ──
     taxa_acerto_pct = round((1.0 - maior_taxa_erro) * 100, 1) if maior_taxa_erro != 0.5 else None
 
     resposta = {
@@ -865,9 +883,9 @@ async def get_quiz_diario(
                 "tipo":      "multipla_escolha",
                 "alternativas": [
                     {
-                        "id":        f"q_{i}_a_{j}",
-                        "texto":     a["texto"],
-                        "correta":   a.get("correta", False),
+                        "id":         f"q_{i}_a_{j}",
+                        "texto":      a["texto"],
+                        "correta":    a.get("correta", False),
                         "explicacao": a.get("explicacao", ""),
                     }
                     for j, a in enumerate(q.get("alternativas", []))
@@ -876,6 +894,23 @@ async def get_quiz_diario(
             for i, q in enumerate(questoes_raw)
         ],
     }
+
+    # ── 9. Salva cache no banco para evitar nova chamada ao Gemini hoje ──
+    try:
+        await db.execute(
+            update(Usuario)
+            .where(Usuario.id == user.id)
+            .values(
+                quiz_diario_cache=json.dumps(resposta, ensure_ascii=False),
+                quiz_diario_gerado_em=datetime.now(timezone.utc),
+            )
+        )
+        await db.commit()
+    except Exception as e:
+        import logging
+        logging.getLogger(__name__).warning(f"Não foi possível salvar cache do quiz: {e}")
+        await db.rollback()
+        # Não bloqueia: retorna o quiz mesmo sem salvar o cache
 
     return resposta
 
@@ -894,7 +929,11 @@ async def concluir_quiz_diario(
         await db.execute(
             update(Usuario)
             .where(Usuario.id == user.id)
-            .values(ultimo_quiz_diario=datetime.now(timezone.utc))
+            .values(
+                ultimo_quiz_diario=datetime.now(timezone.utc),
+                quiz_diario_cache=None,       # limpa o cache — quiz do dia foi concluído
+                quiz_diario_gerado_em=None,
+            )
         )
         await db.commit()
     except Exception as e:

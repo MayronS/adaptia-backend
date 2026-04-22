@@ -44,7 +44,9 @@ class Usuario(Base):
     palavra_chave_dica: Mapped[str | None]      = mapped_column(String(200), nullable=True)
     criado_em:          Mapped[datetime]        = mapped_column(TIMESTAMP(timezone=True), nullable=False, default=lambda: datetime.now(timezone.utc))
     ultimo_acesso:      Mapped[datetime | None] = mapped_column(TIMESTAMP(timezone=True), nullable=True)
-    ultimo_quiz_diario: Mapped[datetime | None] = mapped_column(TIMESTAMP(timezone=True), nullable=True)
+    ultimo_quiz_diario:   Mapped[datetime | None] = mapped_column(TIMESTAMP(timezone=True), nullable=True)
+    quiz_diario_cache:    Mapped[str | None]      = mapped_column(Text, nullable=True)   # JSON com questões geradas
+    quiz_diario_gerado_em: Mapped[datetime | None] = mapped_column(TIMESTAMP(timezone=True), nullable=True)
 
     # Perfis do usuário (pode ter aluno, professor, ou ambos)
     perfis:        Mapped[list["UsuarioPerfil"]]       = relationship(back_populates="usuario", cascade="all, delete-orphan")
