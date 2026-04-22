@@ -772,8 +772,12 @@ async def get_quiz_diario(
 
     # ── 1. Verifica se já fez hoje (controle no banco, não no frontend) ──
     hoje = datetime.now(timezone.utc).date()
-    if user.ultimo_quiz_diario and user.ultimo_quiz_diario.date() == hoje:
-        return {"disponivel": False, "motivo": "Quiz diário já realizado hoje. Volte amanhã!"}
+    try:
+        ultimo = user.ultimo_quiz_diario
+        if ultimo and ultimo.date() == hoje:
+            return {"disponivel": False, "motivo": "Quiz diário já realizado hoje. Volte amanhã!"}
+    except Exception:
+        pass  # coluna ainda não existe no banco (migration pendente) — deixa passar
 
     # ── 2. Calcula taxa de erro por tópico com base nas tentativas ──
     res = await db.execute(
@@ -840,13 +844,10 @@ async def get_quiz_diario(
         logging.getLogger(__name__).error(f"Erro ao gerar quiz diário via Gemini: {e}", exc_info=True)
         raise HTTPException(status_code=502, detail=f"Erro ao gerar quiz: {str(e)}")
 
-    # ── 6. Registra no banco que o aluno fez o quiz hoje ──
-    user.ultimo_quiz_diario = datetime.now(timezone.utc)
-    await db.commit()
-
+    # ── 6. Monta resposta ──
     taxa_acerto_pct = round((1.0 - maior_taxa_erro) * 100, 1) if maior_taxa_erro != 0.5 else None
 
-    return {
+    resposta = {
         "disponivel":      True,
         "topico_id":       str(melhor_topico_id),
         "topico_nome":     topico_nome,
@@ -872,3 +873,15 @@ async def get_quiz_diario(
             for i, q in enumerate(questoes_raw)
         ],
     }
+
+    # ── 7. Registra no banco APÓS montar tudo com sucesso ──
+    try:
+        user.ultimo_quiz_diario = datetime.now(timezone.utc)
+        await db.commit()
+    except Exception as e:
+        import logging
+        logging.getLogger(__name__).warning(f"Não foi possível gravar ultimo_quiz_diario: {e}")
+        # Não bloqueia: o aluno recebe o quiz mesmo se o registro falhar
+        await db.rollback()
+
+    return resposta
