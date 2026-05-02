@@ -164,8 +164,13 @@ async def listar_materias(
     db:   AsyncSession = Depends(get_db),
 ):
     """Lista todas as matérias disponíveis na plataforma."""
-    res = await db.execute(select(Materia).where(Materia.ativo == True).order_by(Materia.ordem))
-    return res.scalars().all()
+    res = await db.execute(
+        select(Materia)
+        .options(selectinload(Materia.criado_por))
+        .where(Materia.ativo == True)
+        .order_by(Materia.ordem)
+    )
+    return [MateriaOut.from_orm_with_autor(m) for m in res.scalars().all()]
 
 
 @router.post("/materias/{materia_id}/adicionar", status_code=201)
