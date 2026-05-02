@@ -712,12 +712,10 @@ async def gerar_quiz_ia(
 
     try:
         questoes = await gerar_quiz_topico(topico_nome, materia_nome, nivel, n_questoes=5)
-    except ValueError as e:
-        raise HTTPException(status_code=502, detail=str(e))
     except Exception as e:
         import logging
         logging.getLogger(__name__).error(f"Erro inesperado no quiz-ia: {e}", exc_info=True)
-        raise HTTPException(status_code=502, detail=f"Erro interno ao gerar quiz: {str(e)}")
+        raise HTTPException(status_code=503, detail="Serviço de geração de quiz indisponível no momento.")
 
     # Monta o quiz no formato do frontend
     quiz = {
@@ -858,12 +856,10 @@ async def get_quiz_diario(
     # ── 7. Gera questões via Gemini ──
     try:
         questoes_raw = await gerar_quiz_topico(topico_nome, materia_nome, nivel, n_questoes=5)
-    except ValueError as e:
-        raise HTTPException(status_code=502, detail=str(e))
     except Exception as e:
         import logging
         logging.getLogger(__name__).error(f"Erro ao gerar quiz diário via Gemini: {e}", exc_info=True)
-        raise HTTPException(status_code=502, detail=f"Erro ao gerar quiz: {str(e)}")
+        raise HTTPException(status_code=503, detail="Quiz diário indisponível no momento.")
 
     # ── 8. Monta resposta ──
     taxa_acerto_pct = round((1.0 - maior_taxa_erro) * 100, 1) if maior_taxa_erro != 0.5 else None
