@@ -1,0 +1,4 @@
+echo "3.11.9" > .python-version
+git add .python-version
+git commit -m "fix: set python version to 3.11"
+git push
