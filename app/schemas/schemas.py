@@ -92,6 +92,7 @@ class MateriaOut(OrmBase):
     descricao:         str | None
     icone:             str | None
     cor:               str | None
+    area:              str | None = None
     ordem:             int
     criado_por_id:     uuid.UUID | None = None
     criado_por_nome:   str | None = None
@@ -104,6 +105,7 @@ class MateriaOut(OrmBase):
             descricao=m.descricao,
             icone=m.icone,
             cor=m.cor,
+            area=m.area,
             ordem=m.ordem,
             criado_por_id=m.criado_por_id,
             criado_por_nome=m.criado_por.nome if m.criado_por else None,
@@ -266,6 +268,7 @@ class MateriaCreate(BaseModel):
     descricao: str | None    = None
     icone:     str | None    = Field(None, max_length=10)
     cor:       str | None    = Field(None, max_length=7)
+    area:      str | None    = Field(None, max_length=60)
     ordem:     int           = 0
     ativo:     bool          = True
 

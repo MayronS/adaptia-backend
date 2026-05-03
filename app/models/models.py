@@ -90,6 +90,7 @@ class Materia(Base):
     descricao:      Mapped[str | None]     = mapped_column(Text)
     icone:          Mapped[str | None]     = mapped_column(String(10))
     cor:            Mapped[str | None]     = mapped_column(String(7))
+    area:           Mapped[str | None]     = mapped_column(String(60), nullable=True)
     ordem:          Mapped[int]            = mapped_column(SmallInteger, nullable=False, default=0)
     ativo:          Mapped[bool]           = mapped_column(Boolean, nullable=False, default=True)
     # NULL = criada pelo admin; preenchido = criada pelo professor com esse id
