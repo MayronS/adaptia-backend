@@ -325,3 +325,196 @@ async def deletar_questao(
         raise HTTPException(status_code=404, detail="Questão não encontrada")
     await db.delete(questao)
     await db.commit()
+
+
+# ══════════════════════════════════════════════════════════════════════════════
+# ANÁLISE DE RESULTADOS
+# ══════════════════════════════════════════════════════════════════════════════
+
+@router.get("/analise")
+async def get_analise(
+    _:  Usuario = Depends(require_admin),
+    db: AsyncSession = Depends(get_db),
+):
+    """
+    Retorna dados consolidados para a aba de Análise de Resultados:
+    - Métricas gerais da plataforma
+    - Desempenho individual dos alunos
+    - Desempenho por matéria
+    - Engajamento (acesso, quiz diário, sequência)
+    """
+    from datetime import datetime, timezone, timedelta
+    from sqlalchemy import func, and_
+    from app.models.models import TentativaQuiz, Quiz, Recomendacao
+
+    hoje = datetime.now(timezone.utc).date()
+    semana_atras = datetime.now(timezone.utc) - timedelta(days=7)
+    mes_atras    = datetime.now(timezone.utc) - timedelta(days=30)
+
+    # ── Busca todos os alunos ──────────────────────────────────────────────────
+    res = await db.execute(
+        select(Usuario)
+        .join(UsuarioPerfil, UsuarioPerfil.usuario_id == Usuario.id)
+        .where(UsuarioPerfil.perfil == PerfilUsuario.aluno, Usuario.ativo == True)
+        .order_by(Usuario.nome)
+    )
+    alunos = res.scalars().all()
+    aluno_ids = [a.id for a in alunos]
+
+    # ── Busca todas as tentativas ──────────────────────────────────────────────
+    res = await db.execute(
+        select(TentativaQuiz)
+        .options(selectinload(TentativaQuiz.quiz).selectinload(Quiz.topico).selectinload(Topico.materia))
+        .where(TentativaQuiz.usuario_id.in_(aluno_ids))
+        .order_by(TentativaQuiz.realizado_em)
+    )
+    tentativas = res.scalars().all()
+
+    # ── Busca progressos ───────────────────────────────────────────────────────
+    res = await db.execute(
+        select(ProgressoTopico)
+        .options(selectinload(ProgressoTopico.topico).selectinload(Topico.materia))
+        .where(ProgressoTopico.usuario_id.in_(aluno_ids))
+    )
+    progressos = res.scalars().all()
+
+    # ── Agrupa tentativas por aluno e por matéria ──────────────────────────────
+    from collections import defaultdict
+
+    tent_por_aluno   = defaultdict(list)
+    tent_por_materia = defaultdict(list)
+
+    for t in tentativas:
+        tent_por_aluno[t.usuario_id].append(t)
+        if t.quiz and t.quiz.topico and t.quiz.topico.materia:
+            mid = t.quiz.topico.materia_id
+            tent_por_materia[mid].append(t)
+
+    prog_por_aluno = defaultdict(list)
+    for p in progressos:
+        prog_por_aluno[p.usuario_id].append(p)
+
+    # ── Métricas gerais ────────────────────────────────────────────────────────
+    total_alunos  = len(alunos)
+    ativos_semana = sum(
+        1 for a in alunos
+        if a.ultimo_acesso and a.ultimo_acesso >= semana_atras
+    )
+    ativos_mes = sum(
+        1 for a in alunos
+        if a.ultimo_acesso and a.ultimo_acesso >= mes_atras
+    )
+    quiz_hoje = sum(
+        1 for a in alunos
+        if a.ultimo_quiz_diario and a.ultimo_quiz_diario.date() == hoje
+    )
+
+    total_acertos = sum(t.acertos for t in tentativas)
+    total_questoes = sum(t.total_questoes for t in tentativas)
+    taxa_geral = round(total_acertos / total_questoes * 100, 1) if total_questoes else 0
+
+    total_concluidos = sum(
+        1 for p in progressos
+        if p.status.value == 'concluido'
+    )
+    total_progresso = len(progressos)
+
+    # ── Desempenho individual dos alunos ───────────────────────────────────────
+    alunos_data = []
+    for a in alunos:
+        tents = tent_por_aluno[a.id]
+        progs = prog_por_aluno[a.id]
+
+        ac  = sum(t.acertos for t in tents)
+        tot = sum(t.total_questoes for t in tents)
+        taxa = round(ac / tot * 100, 1) if tot else None
+
+        concluidos  = sum(1 for p in progs if p.status.value == 'concluido')
+        em_progresso = sum(1 for p in progs if p.status.value == 'em_progresso')
+        total_top   = len(progs)
+
+        # Tentativas recentes (últimos 7 dias)
+        tents_semana = [
+            t for t in tents
+            if t.realizado_em and t.realizado_em >= semana_atras
+        ]
+        exerc_semana = len(tents_semana)
+
+        # Dias sem acesso
+        if a.ultimo_acesso:
+            dias_sem_acesso = (datetime.now(timezone.utc) - a.ultimo_acesso).days
+        else:
+            dias_sem_acesso = None
+
+        # Classificação de risco
+        if dias_sem_acesso is None or dias_sem_acesso > 14:
+            risco = 'alto'
+        elif dias_sem_acesso > 7:
+            risco = 'medio'
+        else:
+            risco = 'baixo'
+
+        alunos_data.append({
+            'id':             str(a.id),
+            'nome':           a.nome,
+            'email':          a.email,
+            'taxa_acerto':    taxa,
+            'total_exercicios': tot,
+            'exerc_semana':   exerc_semana,
+            'topicos_concluidos': concluidos,
+            'topicos_em_progresso': em_progresso,
+            'total_topicos':  total_top,
+            'ultimo_acesso':  a.ultimo_acesso.isoformat() if a.ultimo_acesso else None,
+            'dias_sem_acesso': dias_sem_acesso,
+            'quiz_diario_hoje': bool(a.ultimo_quiz_diario and a.ultimo_quiz_diario.date() == hoje),
+            'risco':          risco,
+        })
+
+    # ── Desempenho por matéria ─────────────────────────────────────────────────
+    res_materias = await db.execute(
+        select(Materia).where(Materia.ativo == True).order_by(Materia.ordem)
+    )
+    todas_materias = res_materias.scalars().all()
+
+    materias_data = []
+    for m in todas_materias:
+        tents = tent_por_materia.get(m.id, [])
+        ac  = sum(t.acertos for t in tents)
+        tot = sum(t.total_questoes for t in tents)
+        taxa = round(ac / tot * 100, 1) if tot else None
+
+        # Alunos com progresso nessa matéria
+        progs_mat = [
+            p for p in progressos
+            if p.topico and p.topico.materia_id == m.id
+        ]
+        alunos_mat = len(set(p.usuario_id for p in progs_mat))
+        concluidos_mat = sum(1 for p in progs_mat if p.status.value == 'concluido')
+        total_progs_mat = len(progs_mat)
+
+        materias_data.append({
+            'id':           str(m.id),
+            'nome':         m.nome,
+            'icone':        m.icone or '📚',
+            'cor':          m.cor or '#3b82f6',
+            'taxa_acerto':  taxa,
+            'total_tentativas': len(tents),
+            'alunos_ativos': alunos_mat,
+            'topicos_concluidos': concluidos_mat,
+            'total_progresso': total_progs_mat,
+        })
+
+    return {
+        'geral': {
+            'total_alunos':    total_alunos,
+            'ativos_semana':   ativos_semana,
+            'ativos_mes':      ativos_mes,
+            'quiz_diario_hoje': quiz_hoje,
+            'taxa_acerto_geral': taxa_geral,
+            'total_exercicios': len(tentativas),
+            'topicos_concluidos': total_concluidos,
+            'total_progresso':  total_progresso,
+        },
+        'alunos':   alunos_data,
+        'materias': materias_data,
+    }
