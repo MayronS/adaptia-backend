@@ -362,21 +362,27 @@ async def get_analise(
     aluno_ids = [a.id for a in alunos]
 
     # ── Busca todas as tentativas ──────────────────────────────────────────────
-    res = await db.execute(
-        select(TentativaQuiz)
-        .options(selectinload(TentativaQuiz.quiz).selectinload(Quiz.topico).selectinload(Topico.materia))
-        .where(TentativaQuiz.usuario_id.in_(aluno_ids))
-        .order_by(TentativaQuiz.realizado_em)
-    )
-    tentativas = res.scalars().all()
+    if aluno_ids:
+        res = await db.execute(
+            select(TentativaQuiz)
+            .options(selectinload(TentativaQuiz.quiz).selectinload(Quiz.topico).selectinload(Topico.materia))
+            .where(TentativaQuiz.usuario_id.in_(aluno_ids))
+            .order_by(TentativaQuiz.realizado_em)
+        )
+        tentativas = res.scalars().all()
+    else:
+        tentativas = []
 
     # ── Busca progressos ───────────────────────────────────────────────────────
-    res = await db.execute(
-        select(ProgressoTopico)
-        .options(selectinload(ProgressoTopico.topico).selectinload(Topico.materia))
-        .where(ProgressoTopico.usuario_id.in_(aluno_ids))
-    )
-    progressos = res.scalars().all()
+    if aluno_ids:
+        res = await db.execute(
+            select(ProgressoTopico)
+            .options(selectinload(ProgressoTopico.topico).selectinload(Topico.materia))
+            .where(ProgressoTopico.usuario_id.in_(aluno_ids))
+        )
+        progressos = res.scalars().all()
+    else:
+        progressos = []
 
     # ── Agrupa tentativas por aluno e por matéria ──────────────────────────────
     from collections import defaultdict
@@ -396,17 +402,25 @@ async def get_analise(
 
     # ── Métricas gerais ────────────────────────────────────────────────────────
     total_alunos  = len(alunos)
+    def tz_aware(dt):
+        """Garante que o datetime seja timezone-aware para comparação segura."""
+        if dt is None:
+            return None
+        if dt.tzinfo is None:
+            return dt.replace(tzinfo=timezone.utc)
+        return dt
+
     ativos_semana = sum(
         1 for a in alunos
-        if a.ultimo_acesso and a.ultimo_acesso >= semana_atras
+        if a.ultimo_acesso and tz_aware(a.ultimo_acesso) >= semana_atras
     )
     ativos_mes = sum(
         1 for a in alunos
-        if a.ultimo_acesso and a.ultimo_acesso >= mes_atras
+        if a.ultimo_acesso and tz_aware(a.ultimo_acesso) >= mes_atras
     )
     quiz_hoje = sum(
         1 for a in alunos
-        if a.ultimo_quiz_diario and a.ultimo_quiz_diario.date() == hoje
+        if a.ultimo_quiz_diario and tz_aware(a.ultimo_quiz_diario).date() == hoje
     )
 
     total_acertos = sum(t.acertos for t in tentativas)
@@ -436,13 +450,13 @@ async def get_analise(
         # Tentativas recentes (últimos 7 dias)
         tents_semana = [
             t for t in tents
-            if t.realizado_em and t.realizado_em >= semana_atras
+            if t.realizado_em and tz_aware(t.realizado_em) >= semana_atras
         ]
         exerc_semana = len(tents_semana)
 
         # Dias sem acesso
         if a.ultimo_acesso:
-            dias_sem_acesso = (datetime.now(timezone.utc) - a.ultimo_acesso).days
+            dias_sem_acesso = (datetime.now(timezone.utc) - tz_aware(a.ultimo_acesso)).days
         else:
             dias_sem_acesso = None
 
@@ -466,7 +480,7 @@ async def get_analise(
             'total_topicos':  total_top,
             'ultimo_acesso':  a.ultimo_acesso.isoformat() if a.ultimo_acesso else None,
             'dias_sem_acesso': dias_sem_acesso,
-            'quiz_diario_hoje': bool(a.ultimo_quiz_diario and a.ultimo_quiz_diario.date() == hoje),
+            'quiz_diario_hoje': bool(a.ultimo_quiz_diario and tz_aware(a.ultimo_quiz_diario).date() == hoje),
             'risco':          risco,
         })
 
