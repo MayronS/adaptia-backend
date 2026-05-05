@@ -468,6 +468,42 @@ async def get_analise(
         else:
             risco = 'baixo'
 
+        # Histórico de evolução — uma entrada por tentativa, ordenada por data
+        historico = []
+        tents_ord = sorted(tents, key=lambda t: t.realizado_em or datetime.min)
+        for idx_t, t in enumerate(tents_ord):
+            taxa_t = round(t.acertos / t.total_questoes * 100, 1) if t.total_questoes else 0
+            # Variação em relação à tentativa anterior
+            variacao = None
+            if idx_t > 0:
+                ant = tents_ord[idx_t - 1]
+                taxa_ant = round(ant.acertos / ant.total_questoes * 100, 1) if ant.total_questoes else 0
+                variacao = round(taxa_t - taxa_ant, 1)
+            materia_nome = (
+                t.quiz.topico.materia.nome
+                if t.quiz and t.quiz.topico and t.quiz.topico.materia
+                else 'Geral'
+            )
+            quiz_nome = t.quiz.titulo if t.quiz else '—'
+            historico.append({
+                'data':        t.realizado_em.strftime('%d/%m') if t.realizado_em else '—',
+                'data_iso':    t.realizado_em.isoformat() if t.realizado_em else None,
+                'acertos':     t.acertos,
+                'total':       t.total_questoes,
+                'taxa':        taxa_t,
+                'variacao':    variacao,
+                'materia':     materia_nome,
+                'quiz':        quiz_nome,
+            })
+
+        # Tendência geral: compara média das últimas 3 com as primeiras 3 tentativas
+        tendencia = None
+        if len(historico) >= 4:
+            inicio = sum(h['taxa'] for h in historico[:3]) / 3
+            fim    = sum(h['taxa'] for h in historico[-3:]) / 3
+            diff   = round(fim - inicio, 1)
+            tendencia = {'diff': diff, 'sentido': 'melhora' if diff > 0 else 'piora' if diff < 0 else 'estavel'}
+
         alunos_data.append({
             'id':             str(a.id),
             'nome':           a.nome,
@@ -482,6 +518,8 @@ async def get_analise(
             'dias_sem_acesso': dias_sem_acesso,
             'quiz_diario_hoje': bool(a.ultimo_quiz_diario and tz_aware(a.ultimo_quiz_diario).date() == hoje),
             'risco':          risco,
+            'historico':      historico,
+            'tendencia':      tendencia,
         })
 
     # ── Desempenho por matéria ─────────────────────────────────────────────────
