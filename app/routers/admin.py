@@ -155,9 +155,43 @@ async def editar_topico(
     topico = res.scalar_one_or_none()
     if not topico:
         raise HTTPException(status_code=404, detail="Tópico não encontrado")
+    
+    prereq_antigo = topico.prerequisito_id
+    prereq_novo   = body.prerequisito_id
 
     for k, v in body.model_dump().items():
         setattr(topico, k, v)
+        
+    if prereq_antigo != prereq_novo:
+        res_prog = await db.execute(
+            select(ProgressoTopico).where(ProgressoTopico.topico_id == topico_id)
+        )
+        progressos = res_prog.scalars().all()
+
+        if prereq_novo is None:
+            # desbloqueia todos que estavam bloqueados
+            for p in progressos:
+                if p.status == StatusProgresso.bloqueado:
+                    p.status = StatusProgresso.disponivel
+        else:
+            # bloqueia alunos que não concluíram o pré-req
+            # Busca quais alunos já concluíram o novo pré-req
+            res_concluidos = await db.execute(
+                select(ProgressoTopico.usuario_id).where(
+                    ProgressoTopico.topico_id == prereq_novo,
+                    ProgressoTopico.status == StatusProgresso.concluido,
+                )
+            )
+            alunos_com_prereq = {r for r in res_concluidos.scalars().all()}
+
+            for p in progressos:
+                if p.status in (StatusProgresso.disponivel, StatusProgresso.em_progresso):
+                    if p.usuario_id not in alunos_com_prereq:
+                        p.status = StatusProgresso.bloqueado
+                elif p.status == StatusProgresso.bloqueado:
+                    if p.usuario_id in alunos_com_prereq:
+                        p.status = StatusProgresso.disponivel
+
     await db.commit()
     await db.refresh(topico)
     return topico
