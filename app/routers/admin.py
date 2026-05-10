@@ -569,12 +569,19 @@ async def get_analise(
         tot = sum(t.total_questoes for t in tents)
         taxa = round(ac / tot * 100, 1) if tot else None
 
-        # Alunos com progresso nessa matéria
+        # Alunos com progresso nessa matéria.
+        # Considera TODOS os progressos da matéria para métricas internas,
+        # mas conta como "aluno inscrito" apenas quem tem status em_progresso
+        # ou concluido — pois disponivel/bloqueado são criados automaticamente
+        # pelo admin ao adicionar um tópico, sem indicar matrícula real.
         progs_mat = [
             p for p in progressos
             if p.topico and p.topico.materia_id == m.id
         ]
-        alunos_mat = len(set(p.usuario_id for p in progs_mat))
+        alunos_mat = len(set(
+            p.usuario_id for p in progs_mat
+            if p.status.value in ('em_progresso', 'concluido')
+        ))
         concluidos_mat = sum(1 for p in progs_mat if p.status.value == 'concluido')
         total_progs_mat = len(progs_mat)
 
