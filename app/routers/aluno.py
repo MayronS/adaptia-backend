@@ -249,6 +249,17 @@ async def remover_materia(
     for p in progressos:
         await db.delete(p)
 
+    # Remove recomendações órfãs desses tópicos para o aluno
+    res = await db.execute(
+        select(Recomendacao).where(
+            Recomendacao.usuario_id == user.id,
+            Recomendacao.topico_id.in_(topico_ids),
+        )
+    )
+    recomendacoes_orfas = res.scalars().all()
+    for r in recomendacoes_orfas:
+        await db.delete(r)
+
     return {"ok": True, "topicos_removidos": len(progressos)}
 
 

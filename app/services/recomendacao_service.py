@@ -1,17 +1,21 @@
 """
 Combina duas estratégias:
 
-1. Score de dificuldade real (60%)
+1. Score de dificuldade real (70%)
    Baseado na taxa de erro do aluno em cada tópico.
    Tópicos onde o aluno mais erra recebem score mais alto.
-   Tópicos nunca tentados recebem score médio (0.5) para incentivar exploração.
+   Tópicos nunca tentados recebem score baixo (0.3) — não devem
+   superar tópicos com dificuldade real identificada.
 
-2. Filtragem colaborativa (40%)
+2. Filtragem colaborativa (30%)
    Calcula similaridade de cosseno entre o vetor de pontuações do aluno
    e os vetores dos demais alunos. Tópicos que alunos similares concluíram
    (e que o aluno atual ainda não fez) recebem bônus de score.
 
-Score final = 0.6 × score_dificuldade + 0.4 × score_colaborativo
+Score final = 0.7 × score_dificuldade + 0.3 × score_colaborativo
+
+IMPORTANTE: Apenas tópicos de matérias em que o aluno está ativamente
+matriculado (possui ProgressoTopico) são considerados candidatos.
 """
 
 import uuid
@@ -26,17 +30,21 @@ from app.models.models import (
     Recomendacao, StatusProgresso,
 )
 
-PESO_DIFICULDADE  = 0.6
-PESO_COLABORATIVO = 0.4
+PESO_DIFICULDADE  = 0.7
+PESO_COLABORATIVO = 0.3
 MIN_SCORE         = 0.05
 TOP_N             = 5
-SCORE_SEM_DADOS   = 0.5   # score para tópicos nunca tentados
+SCORE_SEM_DADOS   = 0.3   # score baixo para tópicos nunca tentados — dificuldade real tem prioridade
 
 
 async def gerar_recomendacoes(usuario_id: uuid.UUID, db: AsyncSession) -> list[Recomendacao]:
     """Gera (ou atualiza) as recomendações para um aluno."""
 
     # ── 1. Tópicos disponíveis/em_progresso para o aluno ──────────────────────
+    # Só considera matérias em que o aluno está ativamente matriculado.
+    # Quando o aluno remove uma matéria, os ProgressoTopico são deletados,
+    # portanto este filtro garante que tópicos de matérias removidas nunca
+    # aparecem como candidatos.
     res = await db.execute(
         select(ProgressoTopico).where(
             ProgressoTopico.usuario_id == usuario_id,
@@ -83,7 +91,8 @@ async def gerar_recomendacoes(usuario_id: uuid.UUID, db: AsyncSession) -> list[R
 
     # ── 4. Score de dificuldade real ───────────────────────────────────────────
     # Taxa de erro = 1 - (acertos / total)
-    # Tópico nunca tentado = score médio (incentiva exploração)
+    # Tópico nunca tentado = score baixo (0.3) para que tópicos com
+    # dificuldade real identificada sempre tenham prioridade.
     scores_dificuldade: dict[uuid.UUID, float] = {}
     for tid in topico_ids_candidatos:
         total = total_por_topico.get(tid, 0)
@@ -153,7 +162,22 @@ async def gerar_recomendacoes(usuario_id: uuid.UUID, db: AsyncSession) -> list[R
     resultados.sort(key=lambda x: x[1], reverse=True)
     resultados = resultados[:TOP_N]
 
-    # ── 7. Persiste recomendações (upsert) ─────────────────────────────────────
+    # ── 7. Invalida recomendações antigas de tópicos fora dos candidatos atuais ─
+    # Garante que recomendações de matérias que o aluno removeu (mas que ficaram
+    # em cache como visualizada=False) sejam descartadas antes de gerar as novas.
+    res = await db.execute(
+        select(Recomendacao).where(
+            Recomendacao.usuario_id  == usuario_id,
+            Recomendacao.visualizada == False,
+        )
+    )
+    recs_existentes = res.scalars().all()
+    topico_ids_set = set(topico_ids_candidatos)
+    for rec in recs_existentes:
+        if rec.topico_id not in topico_ids_set:
+            await db.delete(rec)
+
+    # ── 8. Persiste recomendações (upsert) ─────────────────────────────────────
     novas: list[Recomendacao] = []
     for tid, score, motivo in resultados:
         res = await db.execute(
