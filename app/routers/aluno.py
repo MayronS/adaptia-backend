@@ -659,7 +659,16 @@ async def analise_erros(
     from sqlalchemy.orm import selectinload as sil
     from app.models.models import Topico
 
-    # Busca todas as tentativas com respostas
+    # Busca tópicos em que o aluno ainda está matriculado (disponivel ou em_progresso)
+    res = await db.execute(
+        select(ProgressoTopico.topico_id).where(
+            ProgressoTopico.usuario_id == user.id,
+            ProgressoTopico.status.in_([StatusProgresso.disponivel, StatusProgresso.em_progresso]),
+        )
+    )
+    topico_ids_ativos = {row for row in res.scalars().all()}
+
+    # Busca tentativas apenas dos tópicos ainda ativos
     res = await db.execute(
         select(TentativaQuiz)
         .options(
@@ -681,6 +690,9 @@ async def analise_erros(
         if not t.quiz or not t.quiz.topico:
             continue
         tid = t.quiz.topico_id
+        # Ignora tópicos de matérias que o aluno não está mais cursando
+        if tid not in topico_ids_ativos:
+            continue
         por_topico[tid]["acertos"] += t.acertos
         por_topico[tid]["total"]   += t.total_questoes
         por_topico[tid]["topico"]  = t.quiz.topico.titulo
