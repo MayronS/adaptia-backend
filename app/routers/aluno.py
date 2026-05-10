@@ -87,11 +87,19 @@ async def dashboard(
             acertos_semana[6 - diff] += t.acertos
             exercicios_semana += t.total_questoes
 
-    # Recomendações ativas
+    # Recomendações ativas — apenas tópicos em que o aluno ainda está matriculado.
+    # Filtra via JOIN com ProgressoTopico para excluir recomendações em cache
+    # de matérias que o aluno já removeu.
     res = await db.execute(
         select(Recomendacao)
         .options(selectinload(Recomendacao.topico).selectinload(Topico.materia))
-        .where(Recomendacao.usuario_id == user.id, Recomendacao.visualizada == False)
+        .join(ProgressoTopico, (ProgressoTopico.topico_id == Recomendacao.topico_id) &
+                               (ProgressoTopico.usuario_id == user.id))
+        .where(
+            Recomendacao.usuario_id == user.id,
+            Recomendacao.visualizada == False,
+            ProgressoTopico.status.in_([StatusProgresso.disponivel, StatusProgresso.em_progresso]),
+        )
         .order_by(Recomendacao.score_relevancia.desc())
         .limit(5)
     )
