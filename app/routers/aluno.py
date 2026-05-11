@@ -52,9 +52,10 @@ async def dashboard(
     tentativas = res.scalars().all()
 
     pontuacao_geral  = round(sum(p.pontuacao for p in progressos) / max(len(progressos), 1), 1)
-    total_exercicios = len(tentativas)  # conta quizzes realizados, não questões individuais
-    acertos_total    = sum(t.acertos for t in tentativas)
-    taxa_acerto      = round(acertos_total / max(total_exercicios, 1) * 100, 1)
+    total_exercicios  = len(tentativas)  # conta quizzes realizados, não questões individuais
+    acertos_total     = sum(t.acertos for t in tentativas)
+    total_questoes    = sum(t.total_questoes for t in tentativas)  # usado só para taxa de acerto
+    taxa_acerto       = round(acertos_total / max(total_questoes, 1) * 100, 1)
 
     hoje = datetime.now(timezone.utc).date()
 
