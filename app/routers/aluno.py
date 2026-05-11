@@ -86,7 +86,7 @@ async def dashboard(
         diff = (hoje - data_tent).days
         if 0 <= diff <= 6:
             acertos_semana[6 - diff] += t.acertos
-            exercicios_semana += t.total_questoes
+            exercicios_semana += 1  # conta quizzes realizados na semana, não questões
 
     # Recomendações ativas — apenas tópicos em que o aluno ainda está matriculado.
     # Filtra via JOIN com ProgressoTopico para excluir recomendações em cache
