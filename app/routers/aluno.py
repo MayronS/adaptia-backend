@@ -949,21 +949,54 @@ async def get_quiz_diario(
 
 @router.post("/quiz-diario/concluir", status_code=200)
 async def concluir_quiz_diario(
+    body: dict,
     user: Usuario = Depends(require_aluno),
     db:   AsyncSession = Depends(get_db),
 ):
     """
-    Chamado pelo frontend quando o aluno finaliza e submete o quiz diário.
-    Só então registra no banco que o quiz foi realizado hoje.
-    Usa UPDATE direto para garantir que a alteração seja persistida corretamente.
+    Chamado pelo frontend quando o aluno finaliza o quiz diário.
+    Registra a conclusão e salva uma TentativaQuiz para que os dados
+    entrem nas métricas de taxa de acerto, exercícios feitos e sequência.
     """
+    acertos      = int(body.get("acertos", 0))
+    total        = int(body.get("total", 0))
+    topico_id    = body.get("topico_id")
+    tempo_seg    = body.get("tempo_seg")
+
+    # ── Salva TentativaQuiz para contabilizar nas métricas ──────────────────
+    if total > 0 and topico_id:
+        try:
+            topico_uuid = uuid.UUID(topico_id)
+            # Busca o primeiro quiz ativo do tópico para usar como referência
+            res_quiz = await db.execute(
+                select(Quiz)
+                .where(Quiz.topico_id == topico_uuid, Quiz.ativo == True)
+                .limit(1)
+            )
+            quiz_ref = res_quiz.scalar_one_or_none()
+            if quiz_ref:
+                pontuacao = round(acertos / total * 100)
+                tentativa = TentativaQuiz(
+                    usuario_id=user.id,
+                    quiz_id=quiz_ref.id,
+                    acertos=acertos,
+                    total_questoes=total,
+                    pontuacao=pontuacao,
+                    tempo_gasto_seg=tempo_seg,
+                )
+                db.add(tentativa)
+        except Exception as e:
+            import logging
+            logging.getLogger(__name__).warning(f"Erro ao salvar TentativaQuiz do quiz diário: {e}")
+
+    # ── Marca quiz diário como concluído ────────────────────────────────────
     try:
         await db.execute(
             update(Usuario)
             .where(Usuario.id == user.id)
             .values(
                 ultimo_quiz_diario=datetime.now(timezone.utc),
-                quiz_diario_cache=None,       # limpa o cache — quiz do dia foi concluído
+                quiz_diario_cache=None,
                 quiz_diario_gerado_em=None,
             )
         )
@@ -974,3 +1007,52 @@ async def concluir_quiz_diario(
         await db.rollback()
         raise HTTPException(status_code=500, detail="Erro ao registrar conclusão do quiz.")
     return {"ok": True}
+
+
+@router.post("/quiz-ia/concluir", status_code=200)
+async def concluir_quiz_ia(
+    body: dict,
+    user: Usuario = Depends(require_aluno),
+    db:   AsyncSession = Depends(get_db),
+):
+    """
+    Chamado pelo frontend quando o aluno conclui um quiz de recomendados (gerado por IA).
+    Salva uma TentativaQuiz para que os dados entrem nas métricas de
+    taxa de acerto, exercícios feitos, sequência e conquistas.
+    """
+    acertos   = int(body.get("acertos", 0))
+    total     = int(body.get("total", 0))
+    topico_id = body.get("topico_id")
+    tempo_seg = body.get("tempo_seg")
+
+    if total <= 0 or not topico_id:
+        return {"ok": False, "motivo": "Dados insuficientes para registrar tentativa."}
+
+    try:
+        topico_uuid = uuid.UUID(topico_id)
+        res_quiz = await db.execute(
+            select(Quiz)
+            .where(Quiz.topico_id == topico_uuid, Quiz.ativo == True)
+            .limit(1)
+        )
+        quiz_ref = res_quiz.scalar_one_or_none()
+        if not quiz_ref:
+            return {"ok": False, "motivo": "Nenhum quiz de referência encontrado para o tópico."}
+
+        pontuacao = round(acertos / total * 100)
+        tentativa = TentativaQuiz(
+            usuario_id=user.id,
+            quiz_id=quiz_ref.id,
+            acertos=acertos,
+            total_questoes=total,
+            pontuacao=pontuacao,
+            tempo_gasto_seg=tempo_seg,
+        )
+        db.add(tentativa)
+        await db.commit()
+        return {"ok": True}
+    except Exception as e:
+        import logging
+        logging.getLogger(__name__).warning(f"Erro ao salvar TentativaQuiz do quiz-ia: {e}")
+        await db.rollback()
+        return {"ok": False, "motivo": "Erro interno ao registrar tentativa."}
