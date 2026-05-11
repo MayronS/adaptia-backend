@@ -45,10 +45,23 @@ class TokenData(BaseModel):
 class UsuarioCreate(BaseModel):
     nome:          str           = Field(..., min_length=2, max_length=120)
     email:         EmailStr
-    password:      str           = Field(..., min_length=6)
+    password:      str           = Field(..., min_length=8, max_length=128)
     perfil:        PerfilUsuario = PerfilUsuario.aluno
     palavra_chave: str | None    = Field(None, min_length=3, max_length=100)
     palavra_chave_dica: str | None = Field(None, max_length=200)
+
+    @field_validator('password')
+    @classmethod
+    def password_strength(cls, v: str) -> str:
+        import re
+        errors = []
+        if len(v) < 8:
+            errors.append('mínimo 8 caracteres')
+        if not re.search(r'[0-9]', v):
+            errors.append('pelo menos 1 número')
+        if errors:
+            raise ValueError('Senha fraca: ' + ', '.join(errors))
+        return v
 
 class UsuarioOut(OrmBase):
     id:                 uuid.UUID
