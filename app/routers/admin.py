@@ -585,6 +585,32 @@ async def get_analise(
         concluidos_mat = sum(1 for p in progs_mat if p.status.value == 'concluido')
         total_progs_mat = len(progs_mat)
 
+        # Detalhe por aluno inscrito nessa matéria
+        alunos_ids_mat = set(
+            p.usuario_id for p in progs_mat
+            if p.status.value in ('em_progresso', 'concluido')
+        )
+        alunos_detalhes = []
+        for a in alunos:
+            if a.id not in alunos_ids_mat:
+                continue
+            tents_aluno = [t for t in tents if t.usuario_id == a.id]
+            ac_a  = sum(t.acertos for t in tents_aluno)
+            tot_a = sum(t.total_questoes for t in tents_aluno)
+            taxa_a = round(ac_a / tot_a * 100, 1) if tot_a else None
+            top_conc = sum(1 for p in progs_mat if p.usuario_id == a.id and p.status.value == 'concluido')
+            top_prog = sum(1 for p in progs_mat if p.usuario_id == a.id and p.status.value == 'em_progresso')
+            alunos_detalhes.append({
+                'id':          str(a.id),
+                'nome':        a.nome,
+                'email':       a.email,
+                'tentativas':  len(tents_aluno),
+                'taxa_acerto': taxa_a,
+                'topicos_concluidos': top_conc,
+                'topicos_em_progresso': top_prog,
+            })
+        alunos_detalhes.sort(key=lambda x: (x['taxa_acerto'] is None, -(x['taxa_acerto'] or 0)))
+
         materias_data.append({
             'id':           str(m.id),
             'nome':         m.nome,
@@ -595,6 +621,7 @@ async def get_analise(
             'alunos_ativos': alunos_mat,
             'topicos_concluidos': concluidos_mat,
             'total_progresso': total_progs_mat,
+            'alunos_detalhes': alunos_detalhes,
         })
 
     return {
