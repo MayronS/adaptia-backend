@@ -555,7 +555,11 @@ async def melhores_tentativas(
     user: Usuario      = Depends(require_aluno),
     db:   AsyncSession = Depends(get_db),
 ):
-    """Retorna a melhor tentativa de cada quiz para o aluno logado."""
+    """Retorna a melhor tentativa de cada quiz para o aluno logado.
+    O total_questoes reflete a configuração ATUAL do quiz, não o histórico
+    da tentativa — assim o card sempre mostra X/N correto após o admin
+    alterar a quantidade de questões por tentativa.
+    """
     res = await db.execute(
         select(TentativaQuiz).where(TentativaQuiz.usuario_id == user.id)
     )
@@ -568,16 +572,45 @@ async def melhores_tentativas(
         if atual is None or t.pontuacao > atual.pontuacao:
             melhores[t.quiz_id] = t
 
-    return [
-        MelhorTentativaOut(
+    if not melhores:
+        return []
+
+    # Busca configuração atual dos quizzes para obter total de questões atualizado
+    res_quizzes = await db.execute(
+        select(Quiz)
+        .options(selectinload(Quiz.questoes))
+        .where(Quiz.id.in_(list(melhores.keys())))
+    )
+    quizzes_map: dict[uuid.UUID, Quiz] = {q.id: q for q in res_quizzes.scalars().all()}
+
+    resultado = []
+    for t in melhores.values():
+        quiz = quizzes_map.get(t.quiz_id)
+        if quiz:
+            questoes_ativas = [q for q in quiz.questoes if q.ativo]
+            # total_questoes atual: usa questoes_por_tentativa se configurado,
+            # senão todas as questões ativas do quiz
+            total_atual = quiz.questoes_por_tentativa or len(questoes_ativas)
+        else:
+            total_atual = t.total_questoes  # fallback para o histórico
+
+        # Recalcula acertos proporcionalmente se o total mudou
+        # ex: antes 5/5 (100%) → agora 7 questões → exibe 7/7 (mantém 100%)
+        # ex: antes 3/5 (60%) → agora 7 questões → exibe 4/7 (mantém ~60%)
+        if total_atual != t.total_questoes and t.total_questoes > 0:
+            acertos_proporcional = round(t.pontuacao / 100 * total_atual)
+        else:
+            acertos_proporcional = t.acertos
+
+        resultado.append(MelhorTentativaOut(
             quiz_id=t.quiz_id,
             pontuacao=t.pontuacao,
-            acertos=t.acertos,
-            total_questoes=t.total_questoes,
+            acertos=acertos_proporcional,
+            total_questoes=total_atual,
             aprovado=t.pontuacao >= THRESHOLD_APROVACAO,
-        )
-        for t in melhores.values()
-    ]
+        ))
+
+    return resultado
 
 
 # ── Helper interno ────────────────────────────────────────────────────────────
