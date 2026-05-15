@@ -594,18 +594,12 @@ async def melhores_tentativas(
         else:
             total_atual = t.total_questoes  # fallback para o histórico
 
-        # Recalcula acertos proporcionalmente se o total mudou
-        # ex: antes 5/5 (100%) → agora 7 questões → exibe 7/7 (mantém 100%)
-        # ex: antes 3/5 (60%) → agora 7 questões → exibe 4/7 (mantém ~60%)
-        if total_atual != t.total_questoes and t.total_questoes > 0:
-            acertos_proporcional = round(t.pontuacao / 100 * total_atual)
-        else:
-            acertos_proporcional = t.acertos
-
+        # Acertos são o valor real da tentativa — nunca recalculados.
+        # Só o total_questoes reflete a configuração atual do quiz.
         resultado.append(MelhorTentativaOut(
             quiz_id=t.quiz_id,
             pontuacao=t.pontuacao,
-            acertos=acertos_proporcional,
+            acertos=t.acertos,
             total_questoes=total_atual,
             aprovado=t.pontuacao >= THRESHOLD_APROVACAO,
         ))
