@@ -2,7 +2,7 @@ import uuid
 from datetime import datetime, timedelta, timezone
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy import select
+from sqlalchemy import select, text
 from sqlalchemy.orm import selectinload
 
 from app.database import get_db
@@ -412,11 +412,18 @@ async def deletar_questao(
     _:  Usuario = Depends(require_professor),
     db: AsyncSession = Depends(get_db),
 ):
-    res = await db.execute(select(Questao).where(Questao.id == questao_id))
-    questao = res.scalar_one_or_none()
-    if not questao:
-        raise HTTPException(status_code=404, detail="Questão não encontrada")
-    await db.delete(questao)
+    await db.execute(
+        text("DELETE FROM respostas_questoes WHERE questao_id = :qid"),
+        {"qid": questao_id}
+    )
+    await db.execute(
+        text("DELETE FROM alternativas WHERE questao_id = :qid"),
+        {"qid": questao_id}
+    )
+    await db.execute(
+        text("DELETE FROM questoes WHERE id = :qid"),
+        {"qid": questao_id}
+    )
     await db.commit()
 
 
