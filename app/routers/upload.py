@@ -18,7 +18,7 @@ router = APIRouter(prefix="/upload", tags=["upload"])
 
 ALLOWED_CONTENT_TYPES = {"image/jpeg", "image/png", "image/gif", "image/webp"}
 MAX_FILE_SIZE = 5 * 1024 * 1024  # 5 MB
-BUCKET = "questoes"
+BUCKET = "Questoes"
 
 
 @router.post("/questao-imagem")
@@ -48,9 +48,8 @@ async def upload_questao_imagem(
     ext = mimetypes.guess_extension(file.content_type) or ".jpg"
     ext = ext.replace(".jpe", ".jpg")
     filename = f"{uuid.uuid4().hex}{ext}"
-    path = f"questoes/{filename}"
 
-    upload_url = f"{settings.SUPABASE_URL}/storage/v1/object/{BUCKET}/{path}"
+    upload_url = f"{settings.SUPABASE_URL}/storage/v1/object/{BUCKET}/{filename}"
 
     headers = {
         "Authorization": f"Bearer {settings.SUPABASE_ANON_KEY}",
@@ -70,11 +69,11 @@ async def upload_questao_imagem(
                 detail=f"Supabase retornou {response.status_code}: {response.text[:300]}",
             )
 
-        public_url = f"{settings.SUPABASE_URL}/storage/v1/object/public/{BUCKET}/{path}"
+        public_url = f"{settings.SUPABASE_URL}/storage/v1/object/public/{BUCKET}/{filename}"
 
         return {
             "url": public_url,
-            "path": path,
+            "path": filename,
         }
 
     except httpx.TimeoutException:
