@@ -13,7 +13,7 @@ from app.models.models import (
 )
 from app.schemas.schemas import (
     DashboardProfessorOut, AlunoResumoOut, UsuarioOut,
-    MateriaOut, TopicoOut, QuizOut,
+    MateriaOut, MateriaCreate, TopicoOut, TopicoCreate, QuizOut,
     ConviteCreate, ConviteOut, ResponderConviteRequest,
 )
 from app.services.auth_service import require_professor, get_current_user
@@ -161,6 +161,55 @@ async def listar_materias(
     return res.scalars().all()
 
 
+@router.post("/materias", response_model=MateriaOut, status_code=201)
+async def criar_materia(
+    body: MateriaCreate,
+    user: Usuario = Depends(require_professor),
+    db:   AsyncSession = Depends(get_db),
+):
+    materia = Materia(**body.model_dump(), criado_por_id=user.id)
+    db.add(materia)
+    await db.commit()
+    await db.refresh(materia)
+    return materia
+
+
+@router.put("/materias/{materia_id}", response_model=MateriaOut)
+async def editar_materia(
+    materia_id: uuid.UUID,
+    body: MateriaCreate,
+    user: Usuario = Depends(require_professor),
+    db:   AsyncSession = Depends(get_db),
+):
+    res = await db.execute(select(Materia).where(Materia.id == materia_id))
+    materia = res.scalar_one_or_none()
+    if not materia:
+        raise HTTPException(status_code=404, detail="Matéria não encontrada")
+    if materia.criado_por_id and materia.criado_por_id != user.id:
+        raise HTTPException(status_code=403, detail="Sem permissão para editar esta matéria")
+    for k, v in body.model_dump().items():
+        setattr(materia, k, v)
+    await db.commit()
+    await db.refresh(materia)
+    return materia
+
+
+@router.delete("/materias/{materia_id}", status_code=204)
+async def deletar_materia(
+    materia_id: uuid.UUID,
+    user: Usuario = Depends(require_professor),
+    db:   AsyncSession = Depends(get_db),
+):
+    res = await db.execute(select(Materia).where(Materia.id == materia_id))
+    materia = res.scalar_one_or_none()
+    if not materia:
+        raise HTTPException(status_code=404, detail="Matéria não encontrada")
+    if materia.criado_por_id and materia.criado_por_id != user.id:
+        raise HTTPException(status_code=403, detail="Sem permissão para excluir esta matéria")
+    await db.delete(materia)
+    await db.commit()
+
+
 @router.get("/materias/{materia_id}/topicos", response_model=list[TopicoOut])
 async def listar_topicos(
     materia_id: uuid.UUID,
@@ -174,6 +223,64 @@ async def listar_topicos(
         .order_by(Topico.ordem)
     )
     return res.scalars().all()
+
+
+@router.post("/materias/{materia_id}/topicos", response_model=TopicoOut, status_code=201)
+async def criar_topico(
+    materia_id: uuid.UUID,
+    body: TopicoCreate,
+    _:  Usuario = Depends(require_professor),
+    db: AsyncSession = Depends(get_db),
+):
+    res = await db.execute(select(Materia).where(Materia.id == materia_id))
+    if not res.scalar_one_or_none():
+        raise HTTPException(status_code=404, detail="Matéria não encontrada")
+    topico = Topico(**body.model_dump(), materia_id=materia_id)
+    db.add(topico)
+    await db.commit()
+    res2 = await db.execute(
+        select(Topico).options(selectinload(Topico.materia)).where(Topico.id == topico.id)
+    )
+    return res2.scalar_one()
+
+
+@router.put("/materias/{materia_id}/topicos/{topico_id}", response_model=TopicoOut)
+async def editar_topico(
+    materia_id: uuid.UUID,
+    topico_id:  uuid.UUID,
+    body: TopicoCreate,
+    _:  Usuario = Depends(require_professor),
+    db: AsyncSession = Depends(get_db),
+):
+    res = await db.execute(
+        select(Topico).options(selectinload(Topico.materia))
+        .where(Topico.id == topico_id, Topico.materia_id == materia_id)
+    )
+    topico = res.scalar_one_or_none()
+    if not topico:
+        raise HTTPException(status_code=404, detail="Tópico não encontrado")
+    for k, v in body.model_dump().items():
+        setattr(topico, k, v)
+    await db.commit()
+    await db.refresh(topico)
+    return topico
+
+
+@router.delete("/materias/{materia_id}/topicos/{topico_id}", status_code=204)
+async def deletar_topico(
+    materia_id: uuid.UUID,
+    topico_id:  uuid.UUID,
+    _:  Usuario = Depends(require_professor),
+    db: AsyncSession = Depends(get_db),
+):
+    res = await db.execute(
+        select(Topico).where(Topico.id == topico_id, Topico.materia_id == materia_id)
+    )
+    topico = res.scalar_one_or_none()
+    if not topico:
+        raise HTTPException(status_code=404, detail="Tópico não encontrado")
+    await db.delete(topico)
+    await db.commit()
 
 
 @router.get("/topicos/{topico_id}/quizzes", response_model=list[QuizOut])
