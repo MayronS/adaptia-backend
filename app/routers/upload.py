@@ -18,7 +18,7 @@ router = APIRouter(prefix="/upload", tags=["upload"])
 
 ALLOWED_CONTENT_TYPES = {"image/jpeg", "image/png", "image/gif", "image/webp"}
 MAX_FILE_SIZE = 5 * 1024 * 1024  # 5 MB
-BUCKET = "Questoes"
+BUCKET = "questoes"
 
 
 @router.post("/questao-imagem")
