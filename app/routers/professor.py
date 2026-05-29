@@ -14,7 +14,7 @@ from app.models.models import (
 from app.schemas.schemas import (
     DashboardProfessorOut, AlunoResumoOut, UsuarioOut,
     MateriaOut, MateriaCreate, TopicoOut, TopicoCreate,
-    QuizOut, QuizCreate, QuestaoOut, QuestaoCreate,
+    QuizOut, QuizComQuestoesOut, QuizCreate, QuestaoOut, QuestaoCreate,
     ConviteCreate, ConviteOut, ResponderConviteRequest,
 )
 from app.services.auth_service import require_professor, get_current_user
@@ -284,14 +284,17 @@ async def deletar_topico(
     await db.commit()
 
 
-@router.get("/topicos/{topico_id}/quizzes", response_model=list[QuizOut])
+@router.get("/topicos/{topico_id}/quizzes", response_model=list[QuizComQuestoesOut])
 async def listar_quizzes(
     topico_id: uuid.UUID,
     _:  Usuario = Depends(require_professor),
     db: AsyncSession = Depends(get_db),
 ):
     res = await db.execute(
-        select(Quiz).where(Quiz.topico_id == topico_id).order_by(Quiz.criado_em)
+        select(Quiz)
+        .options(selectinload(Quiz.questoes).selectinload(Questao.alternativas))
+        .where(Quiz.topico_id == topico_id)
+        .order_by(Quiz.criado_em)
     )
     return res.scalars().all()
 
