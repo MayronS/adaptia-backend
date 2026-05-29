@@ -319,6 +319,7 @@ async def listar_quizzes_topico(
                 id=quest.id,
                 enunciado=quest.enunciado,
                 tipo=quest.tipo,
+                imagem_url=quest.imagem_url,
                 pontos=quest.pontos,
                 ordem=i + 1,  # renumera a ordem após o sorteio
                 alternativas=[AlternativaOut.model_validate(a) for a in random.sample(quest.alternativas, len(quest.alternativas))]
