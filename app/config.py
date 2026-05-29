@@ -12,11 +12,9 @@ class Settings(BaseSettings):
     CORS_ORIGINS: str = "http://localhost:5173"
     GEMINI_API_KEY: str = ""
 
-    # Cloudinary
-    CLOUDINARY_URL: str = ""
-    CLOUDINARY_CLOUD_NAME: str = ""
-    CLOUDINARY_API_KEY: str = ""
-    CLOUDINARY_API_SECRET: str = ""
+    # Supabase Storage
+    SUPABASE_URL: str = ""
+    SUPABASE_ANON_KEY: str = ""
 
     @property
     def cors_origins_list(self) -> list[str]:

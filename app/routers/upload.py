@@ -1,11 +1,9 @@
 """
-Rota de upload de imagens para o Cloudinary.
-Usa CLOUDINARY_URL do .env para evitar problemas com caracteres especiais no cloud name.
+Rota de upload de imagens para o Supabase Storage.
 """
-import hashlib
 import logging
-import time
-from urllib.parse import urlparse
+import mimetypes
+import uuid
 
 import httpx
 from fastapi import APIRouter, Depends, File, HTTPException, UploadFile
@@ -20,19 +18,7 @@ router = APIRouter(prefix="/upload", tags=["upload"])
 
 ALLOWED_CONTENT_TYPES = {"image/jpeg", "image/png", "image/gif", "image/webp"}
 MAX_FILE_SIZE = 5 * 1024 * 1024  # 5 MB
-
-
-def _parse_cloudinary_url(url: str):
-    """
-    Extrai cloud_name, api_key e api_secret da CLOUDINARY_URL.
-    Formato: cloudinary://api_key:api_secret@cloud_name
-    """
-    parsed = urlparse(url)
-    return {
-        "cloud_name": parsed.hostname,
-        "api_key": parsed.username,
-        "api_secret": parsed.password,
-    }
+BUCKET = "questoes"
 
 
 @router.post("/questao-imagem")
@@ -42,23 +28,11 @@ async def upload_questao_imagem(
 ):
     settings = get_settings()
 
-    # Tenta usar CLOUDINARY_URL primeiro, depois fallback para variáveis individuais
-    if settings.CLOUDINARY_URL:
-        creds = _parse_cloudinary_url(settings.CLOUDINARY_URL)
-        cloud_name = creds["cloud_name"]
-        api_key    = creds["api_key"]
-        api_secret = creds["api_secret"]
-    elif settings.CLOUDINARY_CLOUD_NAME:
-        cloud_name = settings.CLOUDINARY_CLOUD_NAME
-        api_key    = settings.CLOUDINARY_API_KEY
-        api_secret = settings.CLOUDINARY_API_SECRET
-    else:
+    if not settings.SUPABASE_URL:
         raise HTTPException(
             status_code=503,
-            detail="Serviço de upload não configurado. Defina CLOUDINARY_URL no .env",
+            detail="Serviço de upload não configurado. Defina SUPABASE_URL no .env",
         )
-
-    logger.info("Cloudinary cloud_name: %s | api_key: %s", cloud_name, api_key)
 
     if file.content_type not in ALLOWED_CONTENT_TYPES:
         raise HTTPException(
@@ -70,48 +44,42 @@ async def upload_questao_imagem(
     if len(content) > MAX_FILE_SIZE:
         raise HTTPException(status_code=413, detail="Arquivo muito grande. Máximo: 5 MB.")
 
-    # Assinatura — parâmetros em ordem alfabética e concatenados com o API Secret no final.
-    timestamp = int(time.time())
-    
-    # Removido 'folder' temporariamente para testar permissões
-    params_to_sign = f"timestamp={timestamp}{api_secret}"
-    signature = hashlib.sha1(params_to_sign.encode()).hexdigest()
+    # Gera nome único para o arquivo
+    ext = mimetypes.guess_extension(file.content_type) or ".jpg"
+    ext = ext.replace(".jpe", ".jpg")
+    filename = f"{uuid.uuid4().hex}{ext}"
+    path = f"questoes/{filename}"
 
-    upload_url = f"https://api.cloudinary.com/v1_1/{cloud_name}/image/upload"
+    upload_url = f"{settings.SUPABASE_URL}/storage/v1/object/{BUCKET}/{path}"
+
+    headers = {
+        "Authorization": f"Bearer {settings.SUPABASE_ANON_KEY}",
+        "Content-Type": file.content_type,
+        "x-upsert": "true",
+    }
 
     try:
-        async with httpx.AsyncClient(timeout=60) as client:
-            response = await client.post(
-                upload_url,
-                data={
-                    "api_key": api_key,
-                    "timestamp": str(timestamp),
-                    "signature": signature,
-                },
-                files={"file": (file.filename or "upload.jpg", content, file.content_type)},
-            )
+        async with httpx.AsyncClient(timeout=30) as client:
+            response = await client.post(upload_url, headers=headers, content=content)
 
-        logger.info("Cloudinary status: %s | response: %s", response.status_code, response.text[:300])
+        logger.info("Supabase status: %s | response: %s", response.status_code, response.text[:300])
 
-        if response.status_code != 200:
-            error_msg = response.text[:500]
-            logger.error("Erro no Cloudinary: %s", error_msg)
+        if response.status_code not in (200, 201):
             raise HTTPException(
                 status_code=502,
-                detail=f"Falha no Cloudinary ({response.status_code}): {error_msg}",
+                detail=f"Supabase retornou {response.status_code}: {response.text[:300]}",
             )
 
-        data = response.json()
+        public_url = f"{settings.SUPABASE_URL}/storage/v1/object/public/{BUCKET}/{path}"
+
         return {
-            "url": data["secure_url"],
-            "public_id": data["public_id"],
-            "width": data.get("width"),
-            "height": data.get("height"),
+            "url": public_url,
+            "path": path,
         }
 
     except httpx.TimeoutException:
-        logger.exception("Timeout ao conectar no Cloudinary")
-        raise HTTPException(status_code=504, detail="Timeout ao conectar no Cloudinary.")
+        logger.exception("Timeout ao conectar no Supabase")
+        raise HTTPException(status_code=504, detail="Timeout ao conectar no Supabase.")
     except httpx.RequestError as e:
         logger.exception("Erro de conexão: %s", e)
         raise HTTPException(status_code=502, detail=f"Erro de conexão: {e}")
