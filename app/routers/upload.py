@@ -3,7 +3,6 @@ Rota de upload de imagens para o Cloudinary.
 Usa CLOUDINARY_URL do .env para evitar problemas com caracteres especiais no cloud name.
 """
 import hashlib
-import hmac
 import logging
 import time
 from urllib.parse import urlparse
@@ -71,20 +70,20 @@ async def upload_questao_imagem(
     if len(content) > MAX_FILE_SIZE:
         raise HTTPException(status_code=413, detail="Arquivo muito grande. Máximo: 5 MB.")
 
-    # Assinatura — parâmetros em ordem alfabética
+    # Assinatura — parâmetros em ordem alfabética e concatenados com o API Secret no final.
+    # A Cloudinary exige que todos os parâmetros (exceto api_key, file e resource_type) 
+    # sejam assinados em ordem alfabética.
     timestamp = int(time.time())
     folder = "adaptia/questoes"
-    params_to_sign = f"folder={folder}&timestamp={timestamp}"
-    signature = hmac.new(
-        api_secret.encode(),
-        params_to_sign.encode(),
-        hashlib.sha256,
-    ).hexdigest()
+    
+    # Ordem alfabética: folder=...&timestamp=...
+    params_to_sign = f"folder={folder}&timestamp={timestamp}{api_secret}"
+    signature = hashlib.sha1(params_to_sign.encode()).hexdigest()
 
     upload_url = f"https://api.cloudinary.com/v1_1/{cloud_name}/image/upload"
 
     try:
-        async with httpx.AsyncClient(timeout=30) as client:
+        async with httpx.AsyncClient(timeout=60) as client:  # Aumentado timeout para 60s
             response = await client.post(
                 upload_url,
                 data={
@@ -99,9 +98,11 @@ async def upload_questao_imagem(
         logger.info("Cloudinary status: %s | response: %s", response.status_code, response.text[:300])
 
         if response.status_code != 200:
+            error_msg = response.text[:500]
+            logger.error("Erro no Cloudinary: %s", error_msg)
             raise HTTPException(
                 status_code=502,
-                detail=f"Cloudinary retornou {response.status_code}: {response.text[:300]}",
+                detail=f"Falha no Cloudinary ({response.status_code}): {error_msg}",
             )
 
         data = response.json()
