@@ -149,6 +149,7 @@ class Questao(Base):
     quiz_id:   Mapped[uuid.UUID]   = mapped_column(ForeignKey("quizzes.id", ondelete="CASCADE"), nullable=False)
     enunciado: Mapped[str]         = mapped_column(Text, nullable=False)
     tipo:      Mapped[TipoQuestao] = mapped_column(SAEnum(TipoQuestao, name="tipo_questao"), nullable=False, default=TipoQuestao.multipla_escolha)
+    imagem_url:    Mapped[str | None] = mapped_column(String(500), nullable=True)
     pontos:        Mapped[int]  = mapped_column(SmallInteger, nullable=False, default=1)
     ordem:         Mapped[int]  = mapped_column(SmallInteger, nullable=False, default=0)
     ativo:         Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
@@ -325,6 +326,7 @@ class TurmaQuestao(Base):
     quiz_id:   Mapped[uuid.UUID]   = mapped_column(ForeignKey("turma_quizzes.id", ondelete="CASCADE"), nullable=False)
     enunciado: Mapped[str]         = mapped_column(Text, nullable=False)
     tipo:      Mapped[TipoQuestao] = mapped_column(SAEnum(TipoQuestao, name="tipo_questao"), nullable=False, default=TipoQuestao.multipla_escolha)
+    imagem_url: Mapped[str | None] = mapped_column(String(500), nullable=True)
     pontos:    Mapped[int]         = mapped_column(SmallInteger, nullable=False, default=1)
     ordem:     Mapped[int]         = mapped_column(SmallInteger, nullable=False, default=0)
 

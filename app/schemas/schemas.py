@@ -176,6 +176,7 @@ class QuestaoOut(OrmBase):
     id:           uuid.UUID
     enunciado:    str
     tipo:         TipoQuestao
+    imagem_url:   str | None = None
     pontos:       int
     ordem:        int
     alternativas: list[AlternativaOut] = []
@@ -310,6 +311,7 @@ class AlternativaCreate(BaseModel):
 class QuestaoCreate(BaseModel):
     enunciado:    str                  = Field(..., min_length=5)
     tipo:         TipoQuestao          = TipoQuestao.multipla_escolha
+    imagem_url:   str | None           = Field(None, max_length=500)
     pontos:       int                  = Field(1, ge=1)
     alternativas: list[AlternativaCreate] = Field(default_factory=list)
 
@@ -375,6 +377,7 @@ class TurmaQuestaoOut(OrmBase):
     id:           uuid.UUID
     enunciado:    str
     tipo:         TipoQuestao
+    imagem_url:   str | None = None
     pontos:       int
     ordem:        int
     alternativas: list[TurmaAlternativaOut] = []
@@ -382,6 +385,7 @@ class TurmaQuestaoOut(OrmBase):
 class TurmaQuestaoCreate(BaseModel):
     enunciado:    str                       = Field(..., min_length=5)
     tipo:         TipoQuestao               = TipoQuestao.multipla_escolha
+    imagem_url:   str | None                = Field(None, max_length=500)
     pontos:       int                       = Field(1, ge=1)
     alternativas: list[TurmaAlternativaCreate] = Field(default_factory=list)
 
