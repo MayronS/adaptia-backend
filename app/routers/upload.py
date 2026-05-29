@@ -71,25 +71,21 @@ async def upload_questao_imagem(
         raise HTTPException(status_code=413, detail="Arquivo muito grande. Máximo: 5 MB.")
 
     # Assinatura — parâmetros em ordem alfabética e concatenados com o API Secret no final.
-    # A Cloudinary exige que todos os parâmetros (exceto api_key, file e resource_type) 
-    # sejam assinados em ordem alfabética.
     timestamp = int(time.time())
-    folder = "adaptia/questoes"
     
-    # Ordem alfabética: folder=...&timestamp=...
-    params_to_sign = f"folder={folder}&timestamp={timestamp}{api_secret}"
+    # Removido 'folder' temporariamente para testar permissões
+    params_to_sign = f"timestamp={timestamp}{api_secret}"
     signature = hashlib.sha1(params_to_sign.encode()).hexdigest()
 
     upload_url = f"https://api.cloudinary.com/v1_1/{cloud_name}/image/upload"
 
     try:
-        async with httpx.AsyncClient(timeout=60) as client:  # Aumentado timeout para 60s
+        async with httpx.AsyncClient(timeout=60) as client:
             response = await client.post(
                 upload_url,
                 data={
                     "api_key": api_key,
                     "timestamp": str(timestamp),
-                    "folder": folder,
                     "signature": signature,
                 },
                 files={"file": (file.filename or "upload.jpg", content, file.content_type)},
