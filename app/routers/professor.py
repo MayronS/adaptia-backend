@@ -8,12 +8,13 @@ from sqlalchemy.orm import selectinload
 from app.database import get_db
 from app.models.models import (
     Usuario, UsuarioPerfil, PerfilUsuario,
-    TentativaQuiz, ProgressoTopico, Materia, Topico, Quiz,
+    TentativaQuiz, ProgressoTopico, Materia, Topico, Quiz, Questao, Alternativa,
     VinculoProfessorAluno, StatusVinculo,
 )
 from app.schemas.schemas import (
     DashboardProfessorOut, AlunoResumoOut, UsuarioOut,
-    MateriaOut, MateriaCreate, TopicoOut, TopicoCreate, QuizOut,
+    MateriaOut, MateriaCreate, TopicoOut, TopicoCreate,
+    QuizOut, QuizCreate, QuestaoOut, QuestaoCreate,
     ConviteCreate, ConviteOut, ResponderConviteRequest,
 )
 from app.services.auth_service import require_professor, get_current_user
@@ -293,6 +294,127 @@ async def listar_quizzes(
         select(Quiz).where(Quiz.topico_id == topico_id).order_by(Quiz.criado_em)
     )
     return res.scalars().all()
+
+
+@router.post("/topicos/{topico_id}/quizzes", response_model=QuizOut, status_code=201)
+async def criar_quiz(
+    topico_id: uuid.UUID,
+    body: QuizCreate,
+    _:  Usuario = Depends(require_professor),
+    db: AsyncSession = Depends(get_db),
+):
+    res = await db.execute(select(Topico).where(Topico.id == topico_id))
+    if not res.scalar_one_or_none():
+        raise HTTPException(status_code=404, detail="Tópico não encontrado")
+    quiz = Quiz(topico_id=topico_id, **body.model_dump())
+    db.add(quiz)
+    await db.commit()
+    await db.refresh(quiz)
+    return quiz
+
+
+@router.put("/quizzes/{quiz_id}", response_model=QuizOut)
+async def editar_quiz(
+    quiz_id: uuid.UUID,
+    body: QuizCreate,
+    _:  Usuario = Depends(require_professor),
+    db: AsyncSession = Depends(get_db),
+):
+    res = await db.execute(select(Quiz).where(Quiz.id == quiz_id))
+    quiz = res.scalar_one_or_none()
+    if not quiz:
+        raise HTTPException(status_code=404, detail="Quiz não encontrado")
+    for k, v in body.model_dump().items():
+        setattr(quiz, k, v)
+    await db.commit()
+    await db.refresh(quiz)
+    return quiz
+
+
+@router.delete("/quizzes/{quiz_id}", status_code=204)
+async def deletar_quiz(
+    quiz_id: uuid.UUID,
+    _:  Usuario = Depends(require_professor),
+    db: AsyncSession = Depends(get_db),
+):
+    res = await db.execute(select(Quiz).where(Quiz.id == quiz_id))
+    quiz = res.scalar_one_or_none()
+    if not quiz:
+        raise HTTPException(status_code=404, detail="Quiz não encontrado")
+    await db.delete(quiz)
+    await db.commit()
+
+
+# ── Questões ──────────────────────────────────────────────────────────────────
+
+@router.post("/quizzes/{quiz_id}/questoes", response_model=QuestaoOut, status_code=201)
+async def criar_questao(
+    quiz_id: uuid.UUID,
+    body: QuestaoCreate,
+    _:  Usuario = Depends(require_professor),
+    db: AsyncSession = Depends(get_db),
+):
+    res = await db.execute(select(Quiz).where(Quiz.id == quiz_id))
+    if not res.scalar_one_or_none():
+        raise HTTPException(status_code=404, detail="Quiz não encontrado")
+
+    res_ordem = await db.execute(select(Questao).where(Questao.quiz_id == quiz_id))
+    ordem = len(res_ordem.scalars().all())
+
+    questao = Questao(quiz_id=quiz_id, ordem=ordem, **body.model_dump(exclude={"alternativas"}))
+    db.add(questao)
+    await db.flush()
+
+    for i, alt in enumerate(body.alternativas):
+        db.add(Alternativa(questao_id=questao.id, ordem=i, **alt.model_dump()))
+
+    await db.commit()
+    await db.refresh(questao, ["alternativas"])
+    return questao
+
+
+@router.put("/questoes/{questao_id}", response_model=QuestaoOut)
+async def editar_questao(
+    questao_id: uuid.UUID,
+    body: QuestaoCreate,
+    _:  Usuario = Depends(require_professor),
+    db: AsyncSession = Depends(get_db),
+):
+    res = await db.execute(
+        select(Questao)
+        .options(selectinload(Questao.alternativas))
+        .where(Questao.id == questao_id)
+    )
+    questao = res.scalar_one_or_none()
+    if not questao:
+        raise HTTPException(status_code=404, detail="Questão não encontrada")
+
+    for k, v in body.model_dump(exclude={"alternativas"}).items():
+        setattr(questao, k, v)
+
+    for alt in questao.alternativas:
+        await db.delete(alt)
+    await db.flush()
+    for i, alt in enumerate(body.alternativas):
+        db.add(Alternativa(questao_id=questao.id, ordem=i, **alt.model_dump()))
+
+    await db.commit()
+    await db.refresh(questao, ["alternativas"])
+    return questao
+
+
+@router.delete("/questoes/{questao_id}", status_code=204)
+async def deletar_questao(
+    questao_id: uuid.UUID,
+    _:  Usuario = Depends(require_professor),
+    db: AsyncSession = Depends(get_db),
+):
+    res = await db.execute(select(Questao).where(Questao.id == questao_id))
+    questao = res.scalar_one_or_none()
+    if not questao:
+        raise HTTPException(status_code=404, detail="Questão não encontrada")
+    await db.delete(questao)
+    await db.commit()
 
 
 # ══════════════════════════════════════════════════════════════════════════════
