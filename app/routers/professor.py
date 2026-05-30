@@ -24,10 +24,23 @@ router = APIRouter(prefix="/professor", tags=["professor"])
 
 # ── helpers ───────────────────────────────────────────────────────────────────
 
-async def _resumo_aluno(aluno: Usuario, db: AsyncSession) -> AlunoResumoOut:
-    res_tent = await db.execute(
-        select(TentativaQuiz).where(TentativaQuiz.usuario_id == aluno.id)
-    )
+async def _resumo_aluno(
+    aluno: Usuario,
+    db: AsyncSession,
+    materia_id=None,   # se informado, filtra tentativas desta matéria
+) -> AlunoResumoOut:
+    q = select(TentativaQuiz).where(TentativaQuiz.usuario_id == aluno.id)
+    if materia_id is not None:
+        q = (
+            select(TentativaQuiz)
+            .join(Quiz,   Quiz.id   == TentativaQuiz.quiz_id)
+            .join(Topico, Topico.id == Quiz.topico_id)
+            .where(
+                TentativaQuiz.usuario_id == aluno.id,
+                Topico.materia_id == materia_id,
+            )
+        )
+    res_tent = await db.execute(q)
     tentativas = res_tent.scalars().all()
     total_q = sum(t.total_questoes for t in tentativas)
     acertos = sum(t.acertos for t in tentativas)
@@ -52,38 +65,38 @@ async def _alunos_do_professor(user_id, db: AsyncSession) -> list[Usuario]:
       1. Alunos com vínculo direto aceito (convites).
       2. Alunos que fizeram tentativas em quizzes das matérias criadas pelo professor.
     """
-    # ── 1. Vinculados por convite ──
+    ids: set = set()
+
+    # ── 1. IDs vinculados por convite ──
     res_vinc = await db.execute(
-        select(Usuario)
-        .join(VinculoProfessorAluno, VinculoProfessorAluno.aluno_id == Usuario.id)
-        .options(selectinload(Usuario.perfis))
-        .where(
+        select(VinculoProfessorAluno.aluno_id).where(
             VinculoProfessorAluno.professor_id == user_id,
             VinculoProfessorAluno.status       == StatusVinculo.aceito,
-            Usuario.ativo == True,
         )
     )
-    vinculados = {u.id: u for u in res_vinc.scalars().all()}
+    ids.update(row[0] for row in res_vinc.all())
 
-    # ── 2. Alunos que fizeram quizzes das matérias do professor ──
-    res_alunos_mat = await db.execute(
-        select(Usuario)
-        .join(TentativaQuiz, TentativaQuiz.usuario_id == Usuario.id)
-        .join(Quiz,          Quiz.id          == TentativaQuiz.quiz_id)
-        .join(Topico,        Topico.id         == Quiz.topico_id)
-        .join(Materia,       Materia.id        == Topico.materia_id)
-        .options(selectinload(Usuario.perfis))
-        .where(
-            Materia.criado_por_id == user_id,
-            Usuario.ativo == True,
-        )
+    # ── 2. IDs que fizeram quizzes de matérias do professor ──
+    res_mat = await db.execute(
+        select(TentativaQuiz.usuario_id)
+        .join(Quiz,    Quiz.id    == TentativaQuiz.quiz_id)
+        .join(Topico,  Topico.id  == Quiz.topico_id)
+        .join(Materia, Materia.id == Topico.materia_id)
+        .where(Materia.criado_por_id == user_id)
         .distinct()
     )
-    for u in res_alunos_mat.scalars().all():
-        if u.id not in vinculados:
-            vinculados[u.id] = u
+    ids.update(row[0] for row in res_mat.all())
 
-    return list(vinculados.values())
+    if not ids:
+        return []
+
+    # ── Carrega os objetos Usuario de uma vez ──
+    res = await db.execute(
+        select(Usuario)
+        .options(selectinload(Usuario.perfis))
+        .where(Usuario.id.in_(ids), Usuario.ativo == True)
+    )
+    return res.scalars().all()
 
 
 @router.get("/dashboard", response_model=DashboardProfessorOut)
@@ -133,25 +146,34 @@ async def dashboard_materia(
     if not materia or materia.criado_por_id != user.id:
         raise HTTPException(status_code=403, detail="Sem permissão sobre esta matéria")
 
-    # Alunos que fizeram tentativas em quizzes desta matéria
+    # IDs dos alunos que fizeram tentativas em quizzes desta matéria
+    res_ids = await db.execute(
+        select(TentativaQuiz.usuario_id)
+        .join(Quiz,   Quiz.id   == TentativaQuiz.quiz_id)
+        .join(Topico, Topico.id == Quiz.topico_id)
+        .where(Topico.materia_id == materia_id)
+        .distinct()
+    )
+    aluno_ids = [row[0] for row in res_ids.all()]
+
+    if not aluno_ids:
+        return DashboardProfessorOut(
+            usuario=UsuarioOut.from_usuario(user),
+            media_turma=0.0, total_alunos=0,
+            alunos_ativos=0, precisam_apoio=0, alunos=[],
+        )
+
     res = await db.execute(
         select(Usuario)
-        .join(TentativaQuiz, TentativaQuiz.usuario_id == Usuario.id)
-        .join(Quiz,    Quiz.id    == TentativaQuiz.quiz_id)
-        .join(Topico,  Topico.id  == Quiz.topico_id)
         .options(selectinload(Usuario.perfis))
-        .where(
-            Topico.materia_id == materia_id,
-            Usuario.ativo == True,
-        )
-        .distinct()
+        .where(Usuario.id.in_(aluno_ids), Usuario.ativo == True)
     )
     alunos = res.scalars().all()
 
     resumos: list[AlunoResumoOut] = []
     precisam_apoio = 0
     for aluno in alunos:
-        r = await _resumo_aluno(aluno, db)
+        r = await _resumo_aluno(aluno, db, materia_id=materia_id)
         if r.pontuacao_media < 60 or r.taxa_acerto_pct < 40:
             precisam_apoio += 1
         resumos.append(r)
