@@ -46,21 +46,105 @@ async def _resumo_aluno(aluno: Usuario, db: AsyncSession) -> AlunoResumoOut:
 # DASHBOARD — só alunos vinculados e aceitos
 # ══════════════════════════════════════════════════════════════════════════════
 
+async def _alunos_do_professor(user_id, db: AsyncSession) -> list[Usuario]:
+    """
+    Retorna o conjunto de alunos associados ao professor, unindo:
+      1. Alunos com vínculo direto aceito (convites).
+      2. Alunos que fizeram tentativas em quizzes das matérias criadas pelo professor.
+    """
+    # ── 1. Vinculados por convite ──
+    res_vinc = await db.execute(
+        select(Usuario)
+        .join(VinculoProfessorAluno, VinculoProfessorAluno.aluno_id == Usuario.id)
+        .options(selectinload(Usuario.perfis))
+        .where(
+            VinculoProfessorAluno.professor_id == user_id,
+            VinculoProfessorAluno.status       == StatusVinculo.aceito,
+            Usuario.ativo == True,
+        )
+    )
+    vinculados = {u.id: u for u in res_vinc.scalars().all()}
+
+    # ── 2. Alunos que fizeram quizzes das matérias do professor ──
+    res_alunos_mat = await db.execute(
+        select(Usuario)
+        .join(TentativaQuiz, TentativaQuiz.usuario_id == Usuario.id)
+        .join(Quiz,          Quiz.id          == TentativaQuiz.quiz_id)
+        .join(Topico,        Topico.id         == Quiz.topico_id)
+        .join(Materia,       Materia.id        == Topico.materia_id)
+        .options(selectinload(Usuario.perfis))
+        .where(
+            Materia.criado_por_id == user_id,
+            Usuario.ativo == True,
+        )
+        .distinct()
+    )
+    for u in res_alunos_mat.scalars().all():
+        if u.id not in vinculados:
+            vinculados[u.id] = u
+
+    return list(vinculados.values())
+
+
 @router.get("/dashboard", response_model=DashboardProfessorOut)
 async def dashboard(
     user: Usuario = Depends(require_professor),
     db:   AsyncSession = Depends(get_db),
 ):
-    # Busca apenas alunos com vínculo aceito por este professor
+    alunos = await _alunos_do_professor(user.id, db)
+
+    resumos: list[AlunoResumoOut] = []
+    precisam_apoio = 0
+    for aluno in alunos:
+        r = await _resumo_aluno(aluno, db)
+        if r.pontuacao_media < 60 or r.taxa_acerto_pct < 40:
+            precisam_apoio += 1
+        resumos.append(r)
+
+    media_turma = round(
+        sum(r.pontuacao_media for r in resumos) / max(len(resumos), 1), 1
+    )
+    sete_dias = datetime.now(timezone.utc) - timedelta(days=7)
+    alunos_ativos = sum(
+        1 for r in resumos
+        if r.ultimo_acesso and r.ultimo_acesso >= sete_dias
+    )
+
+    return DashboardProfessorOut(
+        usuario=UsuarioOut.from_usuario(user),
+        media_turma=media_turma,
+        total_alunos=len(alunos),
+        alunos_ativos=alunos_ativos,
+        precisam_apoio=precisam_apoio,
+        alunos=sorted(resumos, key=lambda x: x.pontuacao_media, reverse=True),
+    )
+
+
+@router.get("/materias/{materia_id}/dashboard", response_model=DashboardProfessorOut)
+async def dashboard_materia(
+    materia_id: uuid.UUID,
+    user: Usuario = Depends(require_professor),
+    db:   AsyncSession = Depends(get_db),
+):
+    """Dashboard filtrado pelos alunos que fizeram quizzes desta matéria."""
+    # Verifica que a matéria pertence ao professor
+    res_mat = await db.execute(select(Materia).where(Materia.id == materia_id))
+    materia = res_mat.scalar_one_or_none()
+    if not materia or materia.criado_por_id != user.id:
+        raise HTTPException(status_code=403, detail="Sem permissão sobre esta matéria")
+
+    # Alunos que fizeram tentativas em quizzes desta matéria
     res = await db.execute(
         select(Usuario)
-        .join(VinculoProfessorAluno, VinculoProfessorAluno.aluno_id == Usuario.id)
+        .join(TentativaQuiz, TentativaQuiz.usuario_id == Usuario.id)
+        .join(Quiz,    Quiz.id    == TentativaQuiz.quiz_id)
+        .join(Topico,  Topico.id  == Quiz.topico_id)
         .options(selectinload(Usuario.perfis))
         .where(
-            VinculoProfessorAluno.professor_id == user.id,
-            VinculoProfessorAluno.status       == StatusVinculo.aceito,
+            Topico.materia_id == materia_id,
             Usuario.ativo == True,
         )
+        .distinct()
     )
     alunos = res.scalars().all()
 
