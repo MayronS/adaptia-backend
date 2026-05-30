@@ -9,7 +9,7 @@ from app.database import get_db
 from app.models.models import (
     Usuario, UsuarioPerfil, PerfilUsuario,
     TentativaQuiz, ProgressoTopico, Materia, Topico, Quiz, Questao, Alternativa,
-    VinculoProfessorAluno, StatusVinculo,
+    VinculoProfessorAluno, StatusVinculo, Turma, TurmaAluno,
 )
 from app.schemas.schemas import (
     DashboardProfessorOut, AlunoResumoOut, UsuarioOut,
@@ -64,18 +64,30 @@ async def _resumo_aluno(
 
 
 # ══════════════════════════════════════════════════════════════════════════════
-# DASHBOARD — só alunos vinculados e aceitos
+# DASHBOARD
 # ══════════════════════════════════════════════════════════════════════════════
 
 async def _alunos_do_professor(user_id, db: AsyncSession) -> list[Usuario]:
     """
     Retorna o conjunto de alunos associados ao professor, unindo:
-      1. Alunos com vínculo direto aceito (convites).
-      2. Alunos que fizeram tentativas em quizzes das matérias criadas pelo professor.
+      1. Alunos inscritos em matérias criadas pelo professor (via ProgressoTopico).
+      2. Alunos com vínculo direto aceito (convites).
     """
     ids: set = set()
 
-    # ── 1. IDs vinculados por convite ──
+    # ── 1. IDs inscritos em matérias do professor (fonte principal) ──
+    # Ao adicionar uma matéria, o aluno cria registros em ProgressoTopico.
+    # Esta é a forma correta de detectar inscrição, independente de convite ou tentativa.
+    res_prog = await db.execute(
+        select(ProgressoTopico.usuario_id)
+        .join(Topico,  Topico.id  == ProgressoTopico.topico_id)
+        .join(Materia, Materia.id == Topico.materia_id)
+        .where(Materia.criado_por_id == user_id)
+        .distinct()
+    )
+    ids.update(row[0] for row in res_prog.all())
+
+    # ── 2. IDs vinculados por convite aceito ──
     res_vinc = await db.execute(
         select(VinculoProfessorAluno.aluno_id).where(
             VinculoProfessorAluno.professor_id == user_id,
@@ -83,17 +95,6 @@ async def _alunos_do_professor(user_id, db: AsyncSession) -> list[Usuario]:
         )
     )
     ids.update(row[0] for row in res_vinc.all())
-
-    # ── 2. IDs que fizeram quizzes de matérias do professor ──
-    res_mat = await db.execute(
-        select(TentativaQuiz.usuario_id)
-        .join(Quiz,    Quiz.id    == TentativaQuiz.quiz_id)
-        .join(Topico,  Topico.id  == Quiz.topico_id)
-        .join(Materia, Materia.id == Topico.materia_id)
-        .where(Materia.criado_por_id == user_id)
-        .distinct()
-    )
-    ids.update(row[0] for row in res_mat.all())
 
     if not ids:
         return []
@@ -147,18 +148,17 @@ async def dashboard_materia(
     user: Usuario = Depends(require_professor),
     db:   AsyncSession = Depends(get_db),
 ):
-    """Dashboard filtrado pelos alunos que fizeram quizzes desta matéria."""
+    """Dashboard filtrado pelos alunos inscritos nesta matéria."""
     # Verifica que a matéria pertence ao professor
     res_mat = await db.execute(select(Materia).where(Materia.id == materia_id))
     materia = res_mat.scalar_one_or_none()
     if not materia or materia.criado_por_id != user.id:
         raise HTTPException(status_code=403, detail="Sem permissão sobre esta matéria")
 
-    # IDs dos alunos que fizeram tentativas em quizzes desta matéria
+    # IDs dos alunos inscritos nesta matéria (via ProgressoTopico)
     res_ids = await db.execute(
-        select(TentativaQuiz.usuario_id)
-        .join(Quiz,   Quiz.id   == TentativaQuiz.quiz_id)
-        .join(Topico, Topico.id == Quiz.topico_id)
+        select(ProgressoTopico.usuario_id)
+        .join(Topico, Topico.id == ProgressoTopico.topico_id)
         .where(Topico.materia_id == materia_id)
         .distinct()
     )

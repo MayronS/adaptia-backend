@@ -1,4 +1,4 @@
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from typing import Optional
 import uuid
 
@@ -75,7 +75,7 @@ async def get_current_user(
     user = result.scalar_one_or_none()
     if not user or not user.ativo:
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Usuário não encontrado")
-    user.ultimo_acesso = datetime.utcnow()
+    user.ultimo_acesso = datetime.now(timezone.utc)
     return user
 
 async def require_aluno(
@@ -94,7 +94,7 @@ async def require_aluno(
     user = result.scalar_one_or_none()
     if not user or not user.ativo:
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Usuário não encontrado")
-    user.ultimo_acesso = datetime.utcnow()
+    user.ultimo_acesso = datetime.now(timezone.utc)
     return user
 
 async def require_professor(
@@ -113,7 +113,7 @@ async def require_professor(
     user = result.scalar_one_or_none()
     if not user or not user.ativo:
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Usuário não encontrado")
-    user.ultimo_acesso = datetime.utcnow()
+    user.ultimo_acesso = datetime.now(timezone.utc)
     return user
 
 async def require_admin(
@@ -132,5 +132,5 @@ async def require_admin(
     user = result.scalar_one_or_none()
     if not user or not user.ativo:
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Usuário não encontrado")
-    user.ultimo_acesso = datetime.utcnow()
+    user.ultimo_acesso = datetime.now(timezone.utc)
     return user
