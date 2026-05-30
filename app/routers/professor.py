@@ -29,23 +29,31 @@ async def _resumo_aluno(
     db: AsyncSession,
     materia_id=None,   # se informado, filtra tentativas desta matéria
 ) -> AlunoResumoOut:
-    q = select(TentativaQuiz).where(TentativaQuiz.usuario_id == aluno.id)
-    if materia_id is not None:
-        q = (
+    if materia_id is None:
+        # Todas as tentativas do aluno
+        res_tent = await db.execute(
             select(TentativaQuiz)
-            .join(Quiz,   Quiz.id   == TentativaQuiz.quiz_id)
+            .where(TentativaQuiz.usuario_id == aluno.id)
+        )
+    else:
+        # Só tentativas em quizzes desta matéria — usa subquery para evitar ambiguidade
+        quiz_ids_q = (
+            select(Quiz.id)
             .join(Topico, Topico.id == Quiz.topico_id)
+            .where(Topico.materia_id == materia_id)
+        )
+        res_tent = await db.execute(
+            select(TentativaQuiz)
             .where(
                 TentativaQuiz.usuario_id == aluno.id,
-                Topico.materia_id == materia_id,
+                TentativaQuiz.quiz_id.in_(quiz_ids_q),
             )
         )
-    res_tent = await db.execute(q)
     tentativas = res_tent.scalars().all()
     total_q = sum(t.total_questoes for t in tentativas)
-    acertos = sum(t.acertos for t in tentativas)
-    media   = round(sum(t.pontuacao for t in tentativas) / max(len(tentativas), 1), 1)
-    taxa    = round(acertos / max(total_q, 1) * 100, 1)
+    acertos  = sum(t.acertos        for t in tentativas)
+    media    = round(sum(t.pontuacao for t in tentativas) / max(len(tentativas), 1), 1)
+    taxa     = round(acertos / max(total_q, 1) * 100, 1)
     return AlunoResumoOut(
         usuario=UsuarioOut.from_usuario(aluno),
         pontuacao_media=media,
