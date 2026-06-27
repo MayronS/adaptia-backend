@@ -58,12 +58,12 @@ O AdaptIA é uma plataforma educacional que adapta o conteúdo ao ritmo de cada 
 │  /auth  /aluno  /professor  /admin  /turmas  /upload    │
 │                                                         │
 │        Services          │        Models                │
-│  ┌─────────────────┐     │  ┌──────────────────────┐   │
-│  │  auth_service   │     │  │  Usuario / Perfil    │   │
-│  │  gemini_service │     │  │  Materia / Topico    │   │
-│  │  recomendacao_  │     │  │  Quiz / Questao      │   │
-│  │     service     │     │  │  Progresso / Turma   │   │
-│  └─────────────────┘     │  └──────────────────────┘   │
+│  ┌─────────────────┐     │  ┌──────────────────────┐    │
+│  │  auth_service   │     │  │  Usuario / Perfil    │    │
+│  │  gemini_service │     │  │  Materia / Topico    │    │
+│  │  recomendacao_  │     │  │  Quiz / Questao      │    │
+│  │     service     │     │  │  Progresso / Turma   │    │
+│  └─────────────────┘     │  └──────────────────────┘    │
 └──────────────────────────┼──────────────────────────────┘
                            │
         ┌──────────────────┼──────────────────┐
